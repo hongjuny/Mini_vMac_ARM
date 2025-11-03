@@ -1,0 +1,14 @@
+# ROM files
+*.ROM
+*.rom
+vMac.ROM
+
+# macOS
+.DS_Store
+
+# Build artifacts
+bld/*.o
+setup_tool
+
+# Application bundle (optional - comment out if you want to include it)
+# minivmac.app/

@@ -1835,9 +1835,23 @@ LOCALPROC MyDrawWithOpenGL(ui4r top, ui4r left, ui4r bottom, ui4r right)
 #endif
 
 		[MyNSOpnGLCntxt makeCurrentContext];
+		
+		/* Get backing scale factor */
+		CGFloat scaleFactor = [[MyNSview window] backingScaleFactor];
+		
+		/* Set pixel zoom for Retina displays */
+#if EnableMagnify
+		if (UseMagnify) {
+			glPixelZoom(MyWindowScale * scaleFactor, -MyWindowScale * scaleFactor);
+		} else
+#endif
+		{
+			glPixelZoom(scaleFactor, -scaleFactor);
+		}
 
 		UpdateLuminanceCopy(top, left, bottom, right);
-		glRasterPos2i(GLhOffset + left2, GLvOffset - top2);
+		glRasterPos2i((GLhOffset + left2) * scaleFactor, (GLvOffset - top2) * scaleFactor);
+		
 #if 0 != vMacScreenDepth
 		if (UseColorMode) {
 			glDrawPixels(right - left,
@@ -3221,8 +3235,12 @@ LOCALFUNC blnr GetOpnGLCntxt(void)
 		[MyNSOpnGLCntxt setView: MyNSview];
 		[MyNSOpnGLCntxt update];
 
-		MyAdjustGLforSize(NewWinRect.size.width,
-			NewWinRect.size.height);
+		/* For Retina displays, we need to set up OpenGL correctly */
+		/* NSView returns logical sizes, but OpenGL needs physical framebuffer size */
+		NSRect backingRect = [MyNSview convertRectToBacking:NewWinRect];
+		
+		MyAdjustGLforSize(backingRect.size.width,
+			backingRect.size.height);
 
 #if 0 != vMacScreenDepth
 		ColorModeWorks = trueblnr;

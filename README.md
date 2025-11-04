@@ -39,6 +39,13 @@ The application will be created at `minivmac.app`.
 ## Changelog
 
 ### 2024-11-04
+- **Fixed audio output issues** ([#2](https://github.com/hongjuny/Mini_vMac_ARM/commit/XXXXXX))
+  - Updated deprecated Component Manager API to modern AudioComponent API
+  - Replaced `FindNextComponent` with `AudioComponentFindNext`
+  - Replaced `OpenAComponent` with `AudioComponentInstanceNew`
+  - Replaced `CloseComponent` with `AudioComponentInstanceDispose`
+  - Result: Audio now works correctly on modern macOS including with Bluetooth devices
+
 - **Fixed Retina display scaling** ([#1](https://github.com/hongjuny/Mini_vMac_ARM/commit/XXXXXX))
   - Modified `src/OSGLUCCO.m` to properly handle high-DPI displays
   - Use `convertRectToBacking` for correct framebuffer dimensions
@@ -55,7 +62,6 @@ The application will be created at `minivmac.app`.
 ## Known Issues
 
 - OpenGL deprecation warnings (functional but will need Metal port in future)
-- Audio may have latency on some systems
 
 ## Technical Notes
 

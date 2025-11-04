@@ -2499,11 +2499,11 @@ LOCALPROC MySound_UnInit(void)
 #endif
 		}
 
-		if (noErr != (result = CloseComponent(
+		if (noErr != (result = AudioComponentInstanceDispose(
 			cur_audio.outputAudioUnit)))
 		{
 #if dbglog_HAVE
-			dbglog_writeln("CloseComponent fails in MySound_UnInit");
+			dbglog_writeln("AudioComponentInstanceDispose fails in MySound_UnInit");
 #endif
 		}
 	}
@@ -2514,10 +2514,11 @@ LOCALPROC MySound_UnInit(void)
 LOCALFUNC blnr MySound_Init(void)
 {
 	OSStatus result = noErr;
-	Component comp;
-	ComponentDescription desc;
+	AudioComponent comp;
+	AudioComponentDescription desc;
 	struct AURenderCallbackStruct callback;
 	AudioStreamBasicDescription requestedDesc;
+
 
 	cur_audio.fTheSoundBuffer = TheSoundBuffer;
 	cur_audio.fPlayOffset = &ThePlayOffset;
@@ -2525,6 +2526,7 @@ LOCALFUNC blnr MySound_Init(void)
 	cur_audio.fMinFilledSoundBuffs = &MinFilledSoundBuffs;
 	cur_audio.wantplaying = falseblnr;
 
+	memset(&desc, 0, sizeof(desc));
 	desc.componentType = kAudioUnitType_Output;
 	desc.componentSubType = kAudioUnitSubType_DefaultOutput;
 	desc.componentManufacturer = kAudioUnitManufacturer_Apple;
@@ -2559,19 +2561,19 @@ LOCALFUNC blnr MySound_Init(void)
 	callback.inputProc = audioCallback;
 	callback.inputProcRefCon = &cur_audio;
 
-	if (NULL == (comp = FindNextComponent(NULL, &desc)))
+	if (NULL == (comp = AudioComponentFindNext(NULL, &desc)))
 	{
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: "
-			"FindNextComponent returned NULL");
+			"AudioComponentFindNext returned NULL");
 #endif
 	} else
 
-	if (noErr != (result = OpenAComponent(
+	if (noErr != (result = AudioComponentInstanceNew(
 		comp, &cur_audio.outputAudioUnit)))
 	{
 #if dbglog_HAVE
-		dbglog_writeln("Failed to start CoreAudio: OpenAComponent");
+		dbglog_writeln("Failed to start CoreAudio: AudioComponentInstanceNew");
 #endif
 	} else
 

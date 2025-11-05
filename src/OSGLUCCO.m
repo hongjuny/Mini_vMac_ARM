@@ -3564,10 +3564,18 @@ LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
 	}
 	
 	/* Set viewport to match drawable exactly */
-	CGSize drawableSize = drawable.texture.width > 0 ? 
-		CGSizeMake(drawable.texture.width, drawable.texture.height) :
-		MyMetalLayer.drawableSize;
+	/* In fullscreen, use actual drawable texture size for accurate centering */
+	CGSize drawableSize;
+	if (drawable.texture.width > 0 && drawable.texture.height > 0) {
+		/* Use actual drawable texture dimensions - most accurate */
+		drawableSize = CGSizeMake(drawable.texture.width, drawable.texture.height);
+	} else {
+		/* Fallback to layer drawableSize */
+		drawableSize = MyMetalLayer.drawableSize;
+	}
 	
+	/* Ensure viewport starts at (0,0) and matches drawable exactly */
+	/* This is critical for fullscreen centering */
 	MTLViewport viewport = {
 		.originX = 0.0,
 		.originY = 0.0,
@@ -3579,6 +3587,8 @@ LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
 	[renderEncoder setViewport:viewport];
 	
 	/* Set vertex buffer for viewport and texture sizes (for aspect ratio preservation) */
+	/* Use drawableSize for aspect ratio calculation to match viewport exactly */
+	/* This ensures correct centering in fullscreen mode */
 	float viewportSize[2] = {
 		(float)drawableSize.width,
 		(float)drawableSize.height
@@ -3821,19 +3831,19 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 {
 	/* Update Metal layer size when window is resized */
 #if USE_METAL
-	if (nil != MyMetalLayer && nil != MyNSview) {
-		NSWindow *window = [MyNSview window];
-		if (nil != window) {
-			CGFloat scaleFactor = [window backingScaleFactor];
-			NSRect frame = [MyNSview frame];
-			MyMetalLayer.drawableSize = CGSizeMake(
-				frame.size.width * scaleFactor,
-				frame.size.height * scaleFactor
-			);
-			/* Trigger redraw */
-			ScreenChangedAll();
-		}
-	}
+	MyUpdateMetalContext();
+	/* Trigger redraw */
+	ScreenChangedAll();
+#endif
+}
+
+- (void)windowDidChangeScreen:(NSNotification *)aNotification
+{
+	/* Update Metal layer when screen changes (e.g., fullscreen transition) */
+#if USE_METAL
+	MyUpdateMetalContext();
+	/* Trigger redraw */
+	ScreenChangedAll();
 #endif
 }
 
@@ -4116,10 +4126,6 @@ LOCALFUNC blnr CreateMainWindow(void)
 	[MyWindow setAcceptsMouseMovedEvents: YES];
 	[MyWindow setViewsNeedDisplay: NO];
 
-	[MyWindow registerForDraggedTypes:
-		[NSArray arrayWithObjects:
-			NSURLPboardType, NSFilenamesPboardType, nil]];
-
 	MyWinDelegate = [[MyClassWindowDelegate alloc] init];
 	if (nil == MyWinDelegate) {
 #if dbglog_HAVE
@@ -4361,17 +4367,27 @@ LOCALPROC ReCreateMainWindow(void)
 		WantMagnify = UseMagnify;
 #endif
 
-	} else {
-		GetMyWState(&new_state);
-		SetMyWState(&old_state);
-		CloseMainWindow();
-		SetMyWState(&new_state);
+		} else {
+			GetMyWState(&new_state);
+			SetMyWState(&old_state);
+			CloseMainWindow();
+			SetMyWState(&new_state);
 
-		if (HadCursorHidden) {
-			(void) MyMoveMouse(CurMouseH, CurMouseV);
+			if (HadCursorHidden) {
+				(void) MyMoveMouse(CurMouseH, CurMouseV);
+			}
+			
+#if USE_METAL
+			/* Reinitialize Metal context after window recreation */
+			/* This ensures Metal layer is properly sized for new window/fullscreen */
+			if (nil != MyNSview) {
+				GetMetalContext();
+				/* Update Metal layer size immediately after fullscreen transition */
+				MyUpdateMetalContext();
+			}
+#endif
 		}
 	}
-}
 #endif
 
 #if VarFullScreen && EnableMagnify

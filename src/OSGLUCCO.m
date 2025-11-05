@@ -3563,16 +3563,22 @@ LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
 		[renderEncoder setFragmentTexture:MyMetalTexture atIndex:0];
 	}
 	
-	/* Set vertex buffer for viewport and texture sizes (for aspect ratio preservation) */
-	NSRect viewBounds = [MyNSview bounds];
-	CGFloat scaleFactor = 1.0;
-	NSWindow *window = [MyNSview window];
-	if (nil != window) {
-		scaleFactor = [window backingScaleFactor];
-	}
+	/* Set viewport to match drawable exactly */
+	CGSize drawableSize = drawable.texture.width > 0 ? 
+		CGSizeMake(drawable.texture.width, drawable.texture.height) :
+		MyMetalLayer.drawableSize;
 	
-	/* Use actual drawable size for accurate viewport dimensions */
-	CGSize drawableSize = MyMetalLayer.drawableSize;
+	MTLViewport viewport = {
+		.originX = 0.0,
+		.originY = 0.0,
+		.width = drawableSize.width,
+		.height = drawableSize.height,
+		.znear = 0.0,
+		.zfar = 1.0
+	};
+	[renderEncoder setViewport:viewport];
+	
+	/* Set vertex buffer for viewport and texture sizes (for aspect ratio preservation) */
 	float viewportSize[2] = {
 		(float)drawableSize.width,
 		(float)drawableSize.height
@@ -3584,6 +3590,7 @@ LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
 	
 	/* Use linear filtering for smooth scaling when window is resized */
 	/* Use nearest neighbor for pixel-perfect when window matches native size */
+	NSRect viewBounds = [MyNSview bounds];
 	BOOL useSmoothFiltering = (viewBounds.size.width != vMacScreenWidth || 
 	                           viewBounds.size.height != vMacScreenHeight);
 	

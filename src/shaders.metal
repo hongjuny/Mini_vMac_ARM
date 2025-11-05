@@ -37,19 +37,18 @@ vertex VertexOut vertex_main(uint vertexID [[vertex_id]],
 	float textureAspect = textureSize.x / textureSize.y;
 	
 	/* Scale positions to maintain aspect ratio and center */
+	/* In clip space (-1 to 1), scaling around origin (0,0) automatically centers */
 	float2 scaledPos;
 	if (viewportAspect > textureAspect) {
 		/* Viewport is wider - letterbox (black bars on sides) */
+		/* Scale X to fit texture aspect ratio, Y stays full */
 		float scale = textureAspect / viewportAspect;
-		/* Center horizontally */
-		float offsetX = 0.0;  /* Already centered since we scale around origin */
-		scaledPos = float2(positions[vertexID].x * scale + offsetX, positions[vertexID].y);
+		scaledPos = float2(positions[vertexID].x * scale, positions[vertexID].y);
 	} else {
 		/* Viewport is taller - pillarbox (black bars on top/bottom) */
+		/* Scale Y to fit texture aspect ratio, X stays full */
 		float scale = viewportAspect / textureAspect;
-		/* Center vertically */
-		float offsetY = 0.0;  /* Already centered since we scale around origin */
-		scaledPos = float2(positions[vertexID].x, positions[vertexID].y * scale + offsetY);
+		scaledPos = float2(positions[vertexID].x, positions[vertexID].y * scale);
 	}
 	
 	/* Texture coordinates (0 to 1) */

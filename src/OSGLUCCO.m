@@ -1287,6 +1287,7 @@ LOCALVAR MTLPixelFormat MyMetalPixelFormat = MTLPixelFormatRGBA8Unorm;
 /* Forward declarations for Metal shader functions */
 LOCALFUNC blnr LoadMetalShaders(void);
 LOCALFUNC blnr CreateMetalRenderPipeline(void);
+LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right);
 #endif
 
 /* OpenGL rendering (fallback or legacy) */
@@ -2861,7 +2862,7 @@ LOCALPROC HaveChangedScreenBuff(ui4r top, ui4r left,
 {
 	if ([MyNSview lockFocusIfCanDraw]) {
 #if USE_METAL
-		/* TODO: MyDrawWithMetal will be implemented in Phase 3 */
+		MyDrawWithMetal(top, left, bottom, right);
 #else
 		MyDrawWithOpenGL(top, left, bottom, right);
 #endif
@@ -3350,12 +3351,24 @@ LOCALFUNC blnr GetMetalContext(void)
 		NSUInteger textureWidth = vMacScreenWidth;
 		NSUInteger textureHeight = vMacScreenHeight;
 		
+		/* Choose pixel format based on color mode */
+		MTLPixelFormat textureFormat;
+#if 0 != vMacScreenDepth
+		if (UseColorMode) {
+			textureFormat = MTLPixelFormatRGBA8Unorm;
+		} else
+#endif
+		{
+			textureFormat = MTLPixelFormatR8Unorm;  /* Grayscale */
+		}
+		
 		MTLTextureDescriptor *textureDesc = [MTLTextureDescriptor
-			texture2DDescriptorWithPixelFormat:MyMetalPixelFormat
+			texture2DDescriptorWithPixelFormat:textureFormat
 			width:textureWidth
 			height:textureHeight
 			mipmapped:NO];
 		textureDesc.usage = MTLTextureUsageShaderRead;
+		MyMetalPixelFormat = textureFormat;  /* Store for later use */
 		
 		MyMetalTexture = [MyMetalDevice newTextureWithDescriptor:textureDesc];
 		if (nil == MyMetalTexture) {
@@ -3455,7 +3468,21 @@ LOCALFUNC blnr CreateMetalRenderPipeline(void)
 	
 	/* Get vertex and fragment functions */
 	id<MTLFunction> vertexFunction = [MyMetalLibrary newFunctionWithName:@"vertex_main"];
-	id<MTLFunction> fragmentFunction = [MyMetalLibrary newFunctionWithName:@"fragment_main"];
+	
+	/* Choose fragment shader based on color mode */
+	id<MTLFunction> fragmentFunction;
+#if 0 != vMacScreenDepth
+	if (UseColorMode) {
+		fragmentFunction = [MyMetalLibrary newFunctionWithName:@"fragment_main"];
+	} else
+#endif
+	{
+		/* Try grayscale shader first, fallback to regular */
+		fragmentFunction = [MyMetalLibrary newFunctionWithName:@"fragment_main_grayscale"];
+		if (nil == fragmentFunction) {
+			fragmentFunction = [MyMetalLibrary newFunctionWithName:@"fragment_main"];
+		}
+	}
 	
 	if (nil == vertexFunction || nil == fragmentFunction) {
 #if dbglog_HAVE
@@ -3541,6 +3568,104 @@ LOCALPROC MyAdjustMetalForSize(int h, int v)
 			MyMetalLayer.drawableSize = CGSizeMake(h, v);
 		}
 	}
+}
+
+/* Metal rendering function */
+LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
+{
+	if (nil == MyMetalDevice || nil == MyMetalLayer || nil == MyMetalPipelineState) {
+		/* Metal not initialized */
+		return;
+	}
+
+	/* Update luminance buffer (same as OpenGL version) */
+	UpdateLuminanceCopy(top, left, bottom, right);
+
+	/* Get drawable from Metal layer */
+	id<CAMetalDrawable> drawable = [MyMetalLayer nextDrawable];
+	if (nil == drawable) {
+		/* Could not get drawable, skip this frame */
+		return;
+	}
+
+	/* Update texture with screen buffer data */
+	if (nil != MyMetalTexture && nil != ScalingBuff) {
+		/* Calculate region to update */
+		NSUInteger width = right - left;
+		NSUInteger height = bottom - top;
+		NSUInteger bytesPerRow;
+		const void *sourceData;
+		
+#if 0 != vMacScreenDepth
+		if (UseColorMode) {
+			/* Color mode: RGBA, 4 bytes per pixel */
+			bytesPerRow = vMacScreenWidth * 4;
+			sourceData = ScalingBuff + (left + top * vMacScreenWidth) * 4;
+		} else
+#endif
+		{
+			/* Grayscale mode: 1 byte per pixel */
+			bytesPerRow = vMacScreenWidth;
+			sourceData = ScalingBuff + (left + top * vMacScreenWidth);
+		}
+
+		/* Update texture region */
+		MTLRegion region = {
+			.origin = { left, top, 0 },
+			.size = { width, height, 1 }
+		};
+
+		[MyMetalTexture replaceRegion:region
+		                   mipmapLevel:0
+		                     withBytes:sourceData
+		                   bytesPerRow:bytesPerRow];
+	}
+
+	/* Create command buffer */
+	id<MTLCommandBuffer> commandBuffer = [MyMetalCommandQueue commandBuffer];
+	if (nil == commandBuffer) {
+		return;
+	}
+
+	/* Create render pass descriptor */
+	MTLRenderPassDescriptor *renderPassDesc = [MTLRenderPassDescriptor renderPassDescriptor];
+	if (nil == renderPassDesc) {
+		return;
+	}
+
+	/* Configure render pass */
+	renderPassDesc.colorAttachments[0].texture = drawable.texture;
+	renderPassDesc.colorAttachments[0].loadAction = MTLLoadActionClear;
+	renderPassDesc.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
+	renderPassDesc.colorAttachments[0].storeAction = MTLStoreActionStore;
+
+	/* Create render command encoder */
+	id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDesc];
+	if (nil == renderEncoder) {
+		return;
+	}
+
+	/* Set render pipeline state */
+	[renderEncoder setRenderPipelineState:MyMetalPipelineState];
+
+	/* Set texture */
+	if (nil != MyMetalTexture) {
+		[renderEncoder setFragmentTexture:MyMetalTexture atIndex:0];
+	}
+
+	/* Draw full-screen quad (4 vertices = 2 triangles) */
+	[renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
+	                   vertexStart:0
+	                   vertexCount:4];
+
+	/* End encoding */
+	[renderEncoder endEncoding];
+
+	/* Present drawable */
+	[commandBuffer presentDrawable:drawable];
+
+	/* Commit command buffer */
+	[commandBuffer commit];
 }
 
 #endif /* USE_METAL */

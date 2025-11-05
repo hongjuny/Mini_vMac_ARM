@@ -54,7 +54,27 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
 	                                 min_filter::nearest,
 	                                 address::clamp_to_edge);
 	
-	/* Sample the texture and return the color */
-	return texture.sample(textureSampler, in.texCoord);
+	/* Sample the texture */
+	float4 color = texture.sample(textureSampler, in.texCoord);
+	
+	/* If grayscale (R channel only), convert to RGB */
+	/* For RGBA textures, color already contains all channels */
+	return color;
+}
+
+/* Fragment shader for grayscale (R8) textures */
+fragment float4 fragment_main_grayscale(VertexOut in [[stage_in]],
+                                       texture2d<float> texture [[texture(0)]])
+{
+	/* Nearest neighbor sampling for pixel-perfect rendering */
+	constexpr sampler textureSampler(mag_filter::nearest,
+	                                 min_filter::nearest,
+	                                 address::clamp_to_edge);
+	
+	/* Sample the texture (grayscale in R channel) */
+	float gray = texture.sample(textureSampler, in.texCoord).r;
+	
+	/* Convert to RGB (white = 1.0, black = 0.0) */
+	return float4(gray, gray, gray, 1.0);
 }
 

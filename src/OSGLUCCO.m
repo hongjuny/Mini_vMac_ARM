@@ -32,6 +32,11 @@
 
 #include "STRCONST.h"
 
+/* Metal framework headers */
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#import <MetalKit/MetalKit.h>
+
 /* --- adapting to API/ABI version differences --- */
 
 
@@ -1266,7 +1271,23 @@ LOCALVAR ui4b MyPitch;
 LOCALVAR ui3b MyBytesPerPixel;
 #endif
 
+/* Metal rendering support */
+#define USE_METAL 1  /* Set to 1 to use Metal, 0 to use OpenGL */
+
+#if USE_METAL
+/* Metal device and resources */
+LOCALVAR id<MTLDevice> MyMetalDevice = nil;
+LOCALVAR id<MTLCommandQueue> MyMetalCommandQueue = nil;
+LOCALVAR CAMetalLayer *MyMetalLayer = nil;
+LOCALVAR id<MTLTexture> MyMetalTexture = nil;
+LOCALVAR id<MTLRenderPipelineState> MyMetalPipelineState = nil;
+LOCALVAR MTLPixelFormat MyMetalPixelFormat = MTLPixelFormatRGBA8Unorm;
+#endif
+
+/* OpenGL rendering (fallback or legacy) */
+#if !USE_METAL
 LOCALVAR NSOpenGLContext *MyNSOpnGLCntxt = nil;
+#endif
 LOCALVAR short GLhOffset;
 LOCALVAR short GLvOffset;
 	/* OpenGL coordinates of upper left point of drawing area */
@@ -1782,6 +1803,7 @@ LOCALPROC UpdateLuminanceCopy(si4b top, si4b left,
 	}
 }
 
+#if !USE_METAL
 LOCALPROC MyDrawWithOpenGL(ui4r top, ui4r left, ui4r bottom, ui4r right)
 {
 	if (nil == MyNSOpnGLCntxt) {
@@ -1895,6 +1917,7 @@ label_exit:
 	;
 #endif
 }
+#endif /* !USE_METAL */
 
 #if UseCGContextDrawImage
 LOCALPROC SDL_UpdateRect(si5b x, si5b y, ui5b w, ui5b h)
@@ -2832,7 +2855,11 @@ LOCALPROC HaveChangedScreenBuff(ui4r top, ui4r left,
 	ui4r bottom, ui4r right)
 {
 	if ([MyNSview lockFocusIfCanDraw]) {
+#if USE_METAL
+		/* TODO: MyDrawWithMetal will be implemented in Phase 3 */
+#else
 		MyDrawWithOpenGL(top, left, bottom, right);
+#endif
 		[MyNSview unlockFocus];
 	}
 }
@@ -3175,6 +3202,7 @@ LOCALPROC UngrabMachine(void)
 }
 #endif
 
+#if !USE_METAL
 LOCALPROC MyAdjustGLforSize(int h, int v)
 {
 	[MyNSOpnGLCntxt makeCurrentContext];
@@ -3206,9 +3234,11 @@ LOCALPROC MyAdjustGLforSize(int h, int v)
 
 	ScreenChangedAll();
 }
+#endif /* !USE_METAL */
 
 LOCALVAR blnr WantScreensChangedCheck = falseblnr;
 
+#if !USE_METAL
 LOCALPROC MyUpdateOpenGLContext(void)
 {
 	if (nil != MyNSOpnGLCntxt) {
@@ -3216,9 +3246,11 @@ LOCALPROC MyUpdateOpenGLContext(void)
 		[MyNSOpnGLCntxt update];
 	}
 }
+#endif /* !USE_METAL */
 
 LOCALPROC CloseMyOpenGLContext(void)
 {
+#if !USE_METAL
 	if (nil != MyNSOpnGLCntxt) {
 
 		[NSOpenGLContext clearCurrentContext];
@@ -3229,8 +3261,166 @@ LOCALPROC CloseMyOpenGLContext(void)
 			without settting it first.
 		*/
 	}
+#endif
 }
 
+#if USE_METAL
+/* Metal initialization and management */
+
+LOCALFUNC blnr GetMetalContext(void)
+{
+	blnr v = falseblnr;
+
+	if (nil == MyMetalDevice) {
+		/* Get default Metal device */
+		MyMetalDevice = MTLCreateSystemDefaultDevice();
+		if (nil == MyMetalDevice) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not create Metal device");
+#endif
+			fprintf(stderr, "Warning: Metal is not supported on this system. "
+				"Falling back to OpenGL.\n");
+			goto label_exit;
+		}
+
+		/* Create command queue */
+		MyMetalCommandQueue = [MyMetalDevice newCommandQueue];
+		if (nil == MyMetalCommandQueue) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not create Metal command queue");
+#endif
+			goto label_exit;
+		}
+
+		/* Setup CAMetalLayer on the view */
+		NSView *view = MyNSview;
+		if (nil == view) {
+#if dbglog_HAVE
+			dbglog_writeln("MyNSview is nil, cannot setup Metal layer");
+#endif
+			goto label_exit;
+		}
+
+		/* Configure the view's layer */
+		[view setWantsLayer:YES];
+		CALayer *layer = [view layer];
+		if (nil == layer) {
+			layer = [CALayer layer];
+			[view setLayer:layer];
+		}
+
+		/* Create or get CAMetalLayer */
+		if ([layer isKindOfClass:[CAMetalLayer class]]) {
+			MyMetalLayer = (CAMetalLayer *)layer;
+		} else {
+			/* Replace with CAMetalLayer */
+			MyMetalLayer = [CAMetalLayer layer];
+			MyMetalLayer.frame = view.bounds;
+			[view setLayer:MyMetalLayer];
+		}
+
+		/* Configure Metal layer */
+		MyMetalLayer.device = MyMetalDevice;
+		MyMetalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+		MyMetalLayer.framebufferOnly = YES;  /* Optimize for rendering to screen */
+		
+		/* Handle Retina display */
+		NSWindow *window = [view window];
+		if (nil != window) {
+			CGFloat scaleFactor = [window backingScaleFactor];
+			MyMetalLayer.contentsScale = scaleFactor;
+			MyMetalLayer.drawableSize = CGSizeMake(
+				view.bounds.size.width * scaleFactor,
+				view.bounds.size.height * scaleFactor
+			);
+		} else {
+			MyMetalLayer.contentsScale = 1.0;
+			MyMetalLayer.drawableSize = CGSizeMake(
+				view.bounds.size.width,
+				view.bounds.size.height
+			);
+		}
+
+		/* Create texture for screen buffer */
+		NSUInteger textureWidth = vMacScreenWidth;
+		NSUInteger textureHeight = vMacScreenHeight;
+		
+		MTLTextureDescriptor *textureDesc = [MTLTextureDescriptor
+			texture2DDescriptorWithPixelFormat:MyMetalPixelFormat
+			width:textureWidth
+			height:textureHeight
+			mipmapped:NO];
+		textureDesc.usage = MTLTextureUsageShaderRead;
+		
+		MyMetalTexture = [MyMetalDevice newTextureWithDescriptor:textureDesc];
+		if (nil == MyMetalTexture) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not create Metal texture");
+#endif
+			goto label_exit;
+		}
+
+		/* TODO: Create render pipeline state (will be done in Phase 2) */
+		/* For now, just mark as initialized */
+	}
+
+	v = trueblnr;
+
+label_exit:
+	return v;
+}
+
+LOCALPROC CloseMyMetalContext(void)
+{
+	if (nil != MyMetalTexture) {
+		MyMetalTexture = nil;
+	}
+	if (nil != MyMetalPipelineState) {
+		MyMetalPipelineState = nil;
+	}
+	if (nil != MyMetalCommandQueue) {
+		MyMetalCommandQueue = nil;
+	}
+	if (nil != MyMetalLayer) {
+		MyMetalLayer = nil;
+	}
+	if (nil != MyMetalDevice) {
+		MyMetalDevice = nil;
+	}
+}
+
+LOCALPROC MyUpdateMetalContext(void)
+{
+	if (nil != MyMetalLayer && nil != MyNSview) {
+		NSWindow *window = [MyNSview window];
+		if (nil != window) {
+			CGFloat scaleFactor = [window backingScaleFactor];
+			MyMetalLayer.contentsScale = scaleFactor;
+			NSRect frame = [MyNSview frame];
+			MyMetalLayer.drawableSize = CGSizeMake(
+				frame.size.width * scaleFactor,
+				frame.size.height * scaleFactor
+			);
+		}
+	}
+}
+
+LOCALPROC MyAdjustMetalForSize(int h, int v)
+{
+	if (nil != MyMetalLayer && nil != MyNSview) {
+		NSWindow *window = [MyNSview window];
+		if (nil != window) {
+			CGFloat scaleFactor = [window backingScaleFactor];
+			MyMetalLayer.drawableSize = CGSizeMake(h * scaleFactor, v * scaleFactor);
+		} else {
+			MyMetalLayer.drawableSize = CGSizeMake(h, v);
+		}
+	}
+}
+
+#endif /* USE_METAL */
+
+#if !USE_METAL
 LOCALFUNC blnr GetOpnGLCntxt(void)
 {
 	blnr v = falseblnr;
@@ -3286,8 +3476,13 @@ LOCALFUNC blnr GetOpnGLCntxt(void)
 		/* NSView returns logical sizes, but OpenGL needs physical framebuffer size */
 		NSRect backingRect = [MyNSview convertRectToBacking:NewWinRect];
 		
+#if !USE_METAL
 		MyAdjustGLforSize(backingRect.size.width,
 			backingRect.size.height);
+#else
+		MyAdjustMetalForSize(backingRect.size.width,
+			backingRect.size.height);
+#endif
 
 #if 0 != vMacScreenDepth
 		ColorModeWorks = trueblnr;
@@ -3298,6 +3493,7 @@ LOCALFUNC blnr GetOpnGLCntxt(void)
 label_exit:
 	return v;
 }
+#endif /* !USE_METAL */
 
 typedef NSUInteger (*modifierFlagsProcPtr)
 	(id self, SEL cmd);
@@ -3468,9 +3664,16 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 		And if create after then our content won't
 		be drawn initially, resulting in flicker.
 	*/
+#if USE_METAL
+	if (GetMetalContext()) {
+		/* TODO: MyDrawWithMetal will be implemented in Phase 3 */
+		/* For now, just initialize Metal context */
+	}
+#else
 	if (GetOpnGLCntxt()) {
 		MyDrawWithOpenGL(0, 0, vMacScreenHeight, vMacScreenWidth);
 	}
+#endif
 }
 
 @end
@@ -3513,10 +3716,12 @@ LOCALPROC CloseMainWindow(void)
 	}
 #endif
 
+#if !USE_METAL
 	if (nil != MyNSOpnGLCntxt) {
 		[MyNSOpnGLCntxt release];
 		MyNSOpnGLCntxt = nil;
 	}
+#endif
 }
 
 LOCALPROC QZ_SetCaption(void)
@@ -3742,9 +3947,16 @@ LOCALFUNC blnr CreateMainWindow(void)
 	[MyWindow makeKeyAndOrderFront: nil];
 
 	/* just in case drawRect didn't get called */
+#if USE_METAL
+	if (! GetMetalContext()) {
+#if dbglog_HAVE
+		dbglog_writeln("Could not GetMetalContext");
+#endif
+#else
 	if (! GetOpnGLCntxt()) {
 #if dbglog_HAVE
 		dbglog_writeln("Could not GetOpnGLCntxt");
+#endif
 #endif
 		goto label_exit;
 	}
@@ -3785,7 +3997,9 @@ LOCALPROC ZapMyWState(void)
 	MyCGcontext = nil;
 	MyPixels = NULL;
 #endif
+#if !USE_METAL
 	MyNSOpnGLCntxt = nil;
+#endif
 }
 #endif
 
@@ -3818,7 +4032,9 @@ struct MyWState {
 	ui4b f_MyPitch;
 	ui3b f_MyBytesPerPixel;
 #endif
+#if !USE_METAL
 	NSOpenGLContext *f_MyNSOpnGLCntxt;
+#endif
 	short f_GLhOffset;
 	short f_GLvOffset;
 };
@@ -3855,7 +4071,9 @@ LOCALPROC GetMyWState(MyWState *r)
 	r->f_MyPitch = MyPitch;
 	r->f_MyBytesPerPixel = MyBytesPerPixel;
 #endif
+#if !USE_METAL
 	r->f_MyNSOpnGLCntxt = MyNSOpnGLCntxt;
+#endif
 	r->f_GLhOffset = GLhOffset;
 	r->f_GLvOffset = GLvOffset;
 }
@@ -3891,7 +4109,9 @@ LOCALPROC SetMyWState(MyWState *r)
 	MyPitch = r->f_MyPitch;
 	MyBytesPerPixel = r->f_MyBytesPerPixel;
 #endif
+#if !USE_METAL
 	MyNSOpnGLCntxt = r->f_MyNSOpnGLCntxt;
+#endif
 	GLhOffset = r->f_GLhOffset;
 	GLvOffset = r->f_GLvOffset;
 }
@@ -3924,7 +4144,11 @@ LOCALPROC ReCreateMainWindow(void)
 	}
 #endif
 
+#if USE_METAL
+	CloseMyMetalContext();
+#else
 	CloseMyOpenGLContext();
+#endif
 
 	GetMyWState(&old_state);
 
@@ -4279,7 +4503,11 @@ LOCALPROC CheckForSavedTasks(void)
 	if (WantScreensChangedCheck) {
 		WantScreensChangedCheck = falseblnr;
 
+#if USE_METAL
+		MyUpdateMetalContext();
+#else
 		MyUpdateOpenGLContext();
+#endif
 
 #if VarFullScreen
 		/*
@@ -5031,7 +5259,11 @@ LOCALPROC UnInitOSGLU(void)
 
 	CheckSavedMacMsg();
 
+#if USE_METAL
+	CloseMyMetalContext();
+#else
 	CloseMyOpenGLContext();
+#endif
 	CloseMainWindow();
 
 #if MayFullScreen

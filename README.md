@@ -15,6 +15,19 @@ Native ARM64 build of Mini vMac (Macintosh Plus emulator) optimized for modern m
 
 ## Quick Start
 
+### Prerequisites
+
+- **macOS**: macOS 10.11 (El Capitan) or later
+- **Xcode Command Line Tools**: Required for compilation
+  ```bash
+  # Install Command Line Tools (if not already installed)
+  xcode-select --install
+  ```
+  If the above command doesn't work, you can also install them through Xcode:
+  - Open Xcode
+  - Go to Preferences > Locations
+  - Install Command Line Tools
+
 ### Building from Source
 
 ```bash

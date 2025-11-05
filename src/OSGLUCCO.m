@@ -3277,7 +3277,7 @@ LOCALFUNC blnr GetMetalContext(void)
 {
 	blnr v = falseblnr;
 
-	if (nil == MyMetalDevice) {
+		if (nil == MyMetalDevice) {
 		/* Get default Metal device */
 		MyMetalDevice = MTLCreateSystemDefaultDevice();
 		if (nil == MyMetalDevice) {
@@ -3288,6 +3288,10 @@ LOCALFUNC blnr GetMetalContext(void)
 				"Falling back to OpenGL.\n");
 			goto label_exit;
 		}
+		
+		/* Log Metal initialization */
+		fprintf(stderr, "=== Metal Rendering Enabled ===\n");
+		fprintf(stderr, "Metal Device: %s\n", [[MyMetalDevice name] UTF8String]);
 
 		/* Create command queue */
 		MyMetalCommandQueue = [MyMetalDevice newCommandQueue];
@@ -3664,8 +3668,34 @@ LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
 	/* Present drawable */
 	[commandBuffer presentDrawable:drawable];
 
-	/* Commit command buffer */
+		/* Commit command buffer */
 	[commandBuffer commit];
+}
+
+/* Debug function to check which renderer is active */
+LOCALPROC LogRendererInfo(void)
+{
+#if USE_METAL
+	fprintf(stderr, "\n=== RENDERER INFO ===\n");
+	fprintf(stderr, "Active Renderer: METAL\n");
+	if (nil != MyMetalDevice) {
+		fprintf(stderr, "Metal Device: %s\n", [[MyMetalDevice name] UTF8String]);
+		fprintf(stderr, "Metal Layer: %s\n", (nil != MyMetalLayer) ? "Initialized" : "Not initialized");
+		fprintf(stderr, "Metal Pipeline: %s\n", (nil != MyMetalPipelineState) ? "Ready" : "Not ready");
+	} else {
+		fprintf(stderr, "Metal Device: Not initialized\n");
+	}
+	fprintf(stderr, "===================\n\n");
+#else
+	fprintf(stderr, "\n=== RENDERER INFO ===\n");
+	fprintf(stderr, "Active Renderer: OPENGL\n");
+	if (nil != MyNSOpnGLCntxt) {
+		fprintf(stderr, "OpenGL Context: Initialized\n");
+	} else {
+		fprintf(stderr, "OpenGL Context: Not initialized\n");
+	}
+	fprintf(stderr, "===================\n\n");
+#endif
 }
 
 #endif /* USE_METAL */
@@ -3674,6 +3704,9 @@ LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
 LOCALFUNC blnr GetOpnGLCntxt(void)
 {
 	blnr v = falseblnr;
+	
+	/* Log renderer info on startup */
+	LogRendererInfo();
 
 	if (nil == MyNSOpnGLCntxt) {
 		NSRect NewWinRect = [MyNSview frame];
@@ -3916,8 +3949,8 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 	*/
 #if USE_METAL
 	if (GetMetalContext()) {
-		/* TODO: MyDrawWithMetal will be implemented in Phase 3 */
-		/* For now, just initialize Metal context */
+		/* Log renderer info on startup */
+		LogRendererInfo();
 	}
 #else
 	if (GetOpnGLCntxt()) {

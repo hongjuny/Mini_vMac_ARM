@@ -80,7 +80,7 @@
 #define kStrAppName "Mini vMac"
 #define kAppVariationStr "minivmac-36.04-mc64"
 #define kStrCopyrightYear "2018"
-#define kMaintainerName "unknown"
-#define kStrHomePage "(unknown)"
+#define kMaintainerName "Hong-Jun Yoon"
+#define kStrHomePage "https://github.com/hongjuny/Mini_vMac_ARM"
 
 #define kBldOpts "-br 36 -t mc64"

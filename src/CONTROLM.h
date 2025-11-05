@@ -889,6 +889,7 @@ LOCALPROC DrawCellsControlModeBody(void)
 
 			DrawCellsOneLineStr(kStrWorkOfMany);
 			DrawCellsOneLineStr(kMaintainerName);
+			DrawCellsOneLineStr("Fine-tuned the excellent old Mac emulator to work on modern Macs.");
 			DrawCellsOneLineStr(kStrForMoreInfo);
 			DrawCellsOneLineStr("^w");
 

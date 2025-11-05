@@ -17,7 +17,7 @@ Native ARM64 build of Mini vMac (Macintosh Plus emulator) optimized for modern m
 
 ### Prerequisites
 
-- **macOS**: macOS 10.11 (El Capitan) or later
+- **macOS**: macOS 10.11 (El Capitan) or later (Apple Silicon recommended)
 - **Xcode Command Line Tools**: Required for compilation
   ```bash
   # Install Command Line Tools (if not already installed)
@@ -30,27 +30,86 @@ Native ARM64 build of Mini vMac (Macintosh Plus emulator) optimized for modern m
 
 ### Building from Source
 
-```bash
-# 1. Build the setup tool
-gcc setup/tool.c -o setup_tool
+Follow these steps to build Mini vMac from scratch:
 
-# 2. Generate build configuration
+#### Step 1: Build the Setup Tool
+
+The setup tool generates the build configuration files needed for compilation.
+
+```bash
+gcc setup/tool.c -o setup_tool
+```
+
+This compiles the setup tool that will generate the Makefile and other configuration files.
+
+#### Step 2: Generate Build Configuration
+
+Run the setup tool to generate the build configuration:
+
+```bash
 ./setup_tool -t mc64 > setup.sh
 chmod +x setup.sh
 ./setup.sh
+```
 
-# 3. Build Mini vMac
+This creates:
+- `Makefile` - Build configuration for your system
+- `cfg/` directory - Platform-specific configuration files
+
+#### Step 3: Build Mini vMac
+
+Compile the application:
+
+```bash
 make
 ```
 
-The application will be created at `minivmac.app`.
+The build process will:
+- Compile all source files (`.c` and `.m` files)
+- Link with required frameworks (AppKit, AudioUnit, Metal, QuartzCore)
+- Create the application bundle at `minivmac.app/`
+
+**Build Output:**
+- Application: `minivmac.app/Contents/MacOS/minivmac`
+- Metal shaders: `minivmac.app/Contents/Resources/shaders.metal` (compiled at runtime)
+
+#### Troubleshooting
+
+**If you get "command not found: xcrun" or Metal compiler errors:**
+- This is normal if you only have Command Line Tools installed
+- The Metal shaders will be compiled at runtime (slightly slower first launch)
+- To enable build-time compilation, install full Xcode from the App Store
+
+**If compilation fails:**
+- Make sure Command Line Tools are installed: `xcode-select --install`
+- Check that you're on macOS 10.11 or later
+- Try cleaning and rebuilding: `make clean && make`
 
 ### Running Mini vMac
 
-1. Obtain a Macintosh Plus ROM file (typically named `vMac.ROM`)
-2. Place the ROM file in the same directory as minivmac.app
-3. Launch Mini vMac
-4. Drag and drop `.dsk` disk images onto the window to mount them
+1. **Obtain a Macintosh Plus ROM file**
+   - You need a Macintosh Plus ROM file (typically named `vMac.ROM`)
+   - This must be obtained separately as it contains copyrighted Apple code
+   - Place the ROM file in the same directory as `minivmac.app`
+
+2. **Launch the Application**
+   - Double-click `minivmac.app` or run from terminal:
+     ```bash
+     ./minivmac.app/Contents/MacOS/minivmac
+     ```
+
+3. **Mount Disk Images**
+   - Drag and drop `.dsk` disk image files onto the Mini vMac window
+   - The disk will appear on the desktop
+   - You can mount multiple disks
+
+4. **Enjoy Classic Mac Software**
+   - Run classic Macintosh applications and games
+   - Experience the nostalgia of early Mac computing!
+
+![Oregon Trail Running on Mini vMac](screenshots/oregontrail.png)
+
+*Oregon Trail running on Mini vMac - Classic Mac software in action!*
 
 ## Changelog
 

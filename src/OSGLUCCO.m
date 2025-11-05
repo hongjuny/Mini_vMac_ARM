@@ -32,6 +32,18 @@
 
 #include "STRCONST.h"
 
+/* Metal framework headers */
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#import <MetalKit/MetalKit.h>
+
+/* Uniform Type Identifiers for drag and drop */
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 110000
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#else
+#import <MobileCoreServices/MobileCoreServices.h>
+#endif
+
 /* --- adapting to API/ABI version differences --- */
 
 
@@ -1266,10 +1278,27 @@ LOCALVAR ui4b MyPitch;
 LOCALVAR ui3b MyBytesPerPixel;
 #endif
 
-LOCALVAR NSOpenGLContext *MyNSOpnGLCntxt = nil;
-LOCALVAR short GLhOffset;
-LOCALVAR short GLvOffset;
-	/* OpenGL coordinates of upper left point of drawing area */
+/* Metal rendering support - OpenGL removed */
+#define USE_METAL 1
+
+#if USE_METAL
+/* Metal device and resources */
+LOCALVAR id<MTLDevice> MyMetalDevice = nil;
+LOCALVAR id<MTLCommandQueue> MyMetalCommandQueue = nil;
+LOCALVAR CAMetalLayer *MyMetalLayer = nil;
+LOCALVAR id<MTLTexture> MyMetalTexture = nil;
+LOCALVAR id<MTLRenderPipelineState> MyMetalPipelineState = nil;
+LOCALVAR id<MTLLibrary> MyMetalLibrary = nil;
+LOCALVAR MTLPixelFormat MyMetalPixelFormat = MTLPixelFormatRGBA8Unorm;
+
+/* Forward declarations for Metal shader functions */
+LOCALFUNC blnr LoadMetalShaders(void);
+LOCALFUNC blnr CreateMetalRenderPipeline(void);
+LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right);
+LOCALPROC LogRendererInfo(void);
+#endif
+
+/* OpenGL removed - Metal only */
 
 
 LOCALPROC MyHideCursor(void)
@@ -1782,119 +1811,7 @@ LOCALPROC UpdateLuminanceCopy(si4b top, si4b left,
 	}
 }
 
-LOCALPROC MyDrawWithOpenGL(ui4r top, ui4r left, ui4r bottom, ui4r right)
-{
-	if (nil == MyNSOpnGLCntxt) {
-		/* oops */
-	} else {
-		si4b top2;
-		si4b left2;
-
-#if VarFullScreen
-		if (UseFullScreen)
-#endif
-#if MayFullScreen
-		{
-			if (top < ViewVStart) {
-				top = ViewVStart;
-			}
-			if (left < ViewHStart) {
-				left = ViewHStart;
-			}
-			if (bottom > ViewVStart + ViewVSize) {
-				bottom = ViewVStart + ViewVSize;
-			}
-			if (right > ViewHStart + ViewHSize) {
-				right = ViewHStart + ViewHSize;
-			}
-
-			if ((top >= bottom) || (left >= right)) {
-				goto label_exit;
-			}
-		}
-#endif
-
-		top2 = top;
-		left2 = left;
-
-#if VarFullScreen
-		if (UseFullScreen)
-#endif
-#if MayFullScreen
-		{
-			left2 -= ViewHStart;
-			top2 -= ViewVStart;
-		}
-#endif
-
-#if EnableMagnify
-		if (UseMagnify) {
-			top2 *= MyWindowScale;
-			left2 *= MyWindowScale;
-		}
-#endif
-
-		[MyNSOpnGLCntxt makeCurrentContext];
-		
-		/* Get backing scale factor */
-		CGFloat scaleFactor = [[MyNSview window] backingScaleFactor];
-		
-		/* Set pixel zoom for Retina displays */
-#if EnableMagnify
-		if (UseMagnify) {
-			glPixelZoom(MyWindowScale * scaleFactor, -MyWindowScale * scaleFactor);
-		} else
-#endif
-		{
-			glPixelZoom(scaleFactor, -scaleFactor);
-		}
-
-		UpdateLuminanceCopy(top, left, bottom, right);
-		glRasterPos2i((GLhOffset + left2) * scaleFactor, (GLvOffset - top2) * scaleFactor);
-		
-#if 0 != vMacScreenDepth
-		if (UseColorMode) {
-			glDrawPixels(right - left,
-				bottom - top,
-				GL_RGBA,
-				GL_UNSIGNED_INT_8_8_8_8,
-				ScalingBuff + (left + top * vMacScreenWidth) * 4
-				);
-		} else
-#endif
-		{
-			glDrawPixels(right - left,
-				bottom - top,
-				GL_LUMINANCE,
-				GL_UNSIGNED_BYTE,
-				ScalingBuff + (left + top * vMacScreenWidth)
-				);
-		}
-
-#if 0 /* a very quick and dirty check of where drawing */
-		glDrawPixels(right - left,
-			1,
-			GL_RED,
-			GL_UNSIGNED_BYTE,
-			ScalingBuff + (left + top * vMacScreenWidth)
-			);
-
-		glDrawPixels(1,
-			bottom - top,
-			GL_RED,
-			GL_UNSIGNED_BYTE,
-			ScalingBuff + (left + top * vMacScreenWidth)
-			);
-#endif
-
-		glFlush();
-	}
-
-#if MayFullScreen
-label_exit:
-	;
-#endif
-}
+/* OpenGL code removed - Metal only */
 
 #if UseCGContextDrawImage
 LOCALPROC SDL_UpdateRect(si5b x, si5b y, ui5b w, ui5b h)
@@ -2181,6 +2098,11 @@ typedef ui4r trSoundTemp;
 
 #define AudioStepVal 0x0040
 
+/* Audio initialization constants */
+#define kMacPlusClockRate 7833600UL  /* Mac Plus clock frequency in Hz */
+#define kSoundBufferSize 704         /* Sound buffer size in samples */
+#define kSoundRetryDelayNs 10000000L /* Delay between retries: 10ms in nanoseconds */
+
 #if 3 == kLn2SoundSampSz
 #define ConvertTempSoundSampleFromNative(v) ((v) << 8)
 #elif 4 == kLn2SoundSampSz
@@ -2424,7 +2346,7 @@ label_retry:
 #endif
 
 			rqt.tv_sec = 0;
-			rqt.tv_nsec = 10000000;
+			rqt.tv_nsec = kSoundRetryDelayNs;
 			(void) nanosleep(&rqt, &rmt);
 
 			goto label_retry;
@@ -2509,15 +2431,17 @@ LOCALPROC MySound_UnInit(void)
 	}
 }
 
-#define SOUND_SAMPLERATE 22255 /* = round(7833600 * 2 / 704) */
+/* Sound sample rate calculation: round(MacPlusClockRate * 2 / SoundBufferSize) */
+#define SOUND_SAMPLERATE (unsigned int)((kMacPlusClockRate * 2 + kSoundBufferSize / 2) / kSoundBufferSize)
 
 LOCALFUNC blnr MySound_Init(void)
 {
 	OSStatus result = noErr;
-	AudioComponent comp;
+	AudioComponent comp = NULL;
 	AudioComponentDescription desc;
 	struct AURenderCallbackStruct callback;
 	AudioStreamBasicDescription requestedDesc;
+	blnr cleanupNeeded = falseblnr;
 
 
 	cur_audio.fTheSoundBuffer = TheSoundBuffer;
@@ -2561,31 +2485,48 @@ LOCALFUNC blnr MySound_Init(void)
 	callback.inputProc = audioCallback;
 	callback.inputProcRefCon = &cur_audio;
 
+	/* Step 1: Find audio component */
 	if (NULL == (comp = AudioComponentFindNext(NULL, &desc)))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not find audio output component. "
+			"Audio will be disabled.\n");
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: "
 			"AudioComponentFindNext returned NULL");
 #endif
-	} else
+		goto label_cleanup;
+	}
 
+	/* Step 2: Create audio component instance */
 	if (noErr != (result = AudioComponentInstanceNew(
 		comp, &cur_audio.outputAudioUnit)))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not create audio component instance (error: %d). "
+			"Audio will be disabled.\n", (int)result);
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: AudioComponentInstanceNew");
 #endif
-	} else
+		goto label_cleanup;
+	}
+	cleanupNeeded = trueblnr;
 
+	/* Step 3: Initialize audio unit */
 	if (noErr != (result = AudioUnitInitialize(
 		cur_audio.outputAudioUnit)))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not initialize audio unit (error: %d). "
+			"Audio will be disabled.\n", (int)result);
 #if dbglog_HAVE
 		dbglog_writeln(
 			"Failed to start CoreAudio: AudioUnitInitialize");
 #endif
-	} else
+		goto label_cleanup;
+	}
 
+	/* Step 4: Set stream format */
 	if (noErr != (result = AudioUnitSetProperty(
 		cur_audio.outputAudioUnit,
 		kAudioUnitProperty_StreamFormat,
@@ -2594,12 +2535,17 @@ LOCALFUNC blnr MySound_Init(void)
 		&requestedDesc,
 		sizeof(requestedDesc))))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not set stream format (error: %d). "
+			"Audio will be disabled.\n", (int)result);
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: "
 			"AudioUnitSetProperty(kAudioUnitProperty_StreamFormat)");
 #endif
-	} else
+		goto label_cleanup;
+	}
 
+	/* Step 5: Set render callback */
 	if (noErr != (result = AudioUnitSetProperty(
 		cur_audio.outputAudioUnit,
 		kAudioUnitProperty_SetRenderCallback,
@@ -2608,23 +2554,39 @@ LOCALFUNC blnr MySound_Init(void)
 		&callback,
 		sizeof(callback))))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not set render callback (error: %d). "
+			"Audio will be disabled.\n", (int)result);
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: "
 			"AudioUnitSetProperty(kAudioUnitProperty_SetInputCallback)"
 			);
 #endif
-	} else
-
-	{
-		cur_audio.enabled = trueblnr;
-
-		MySound_Start();
-			/*
-				This should be taken care of by LeaveSpeedStopped,
-				but since takes a while to get going properly,
-				start early.
-			*/
+		goto label_cleanup;
 	}
+
+	/* Success: Enable audio */
+	cur_audio.enabled = trueblnr;
+
+	MySound_Start();
+		/*
+			This should be taken care of by LeaveSpeedStopped,
+			but since takes a while to get going properly,
+			start early.
+		*/
+
+	return trueblnr; /* keep going, even if no sound */
+
+label_cleanup:
+	/* Cleanup on failure */
+	if (cleanupNeeded) {
+		if (cur_audio.outputAudioUnit != NULL) {
+			AudioComponentInstanceDispose(cur_audio.outputAudioUnit);
+			cur_audio.outputAudioUnit = NULL;
+		}
+		cleanupNeeded = falseblnr;
+	}
+	cur_audio.enabled = falseblnr;
 
 	return trueblnr; /* keep going, even if no sound */
 }
@@ -2787,7 +2749,11 @@ LOCALPROC HaveChangedScreenBuff(ui4r top, ui4r left,
 	ui4r bottom, ui4r right)
 {
 	if ([MyNSview lockFocusIfCanDraw]) {
+#if USE_METAL
+		MyDrawWithMetal(top, left, bottom, right);
+#else
 		MyDrawWithOpenGL(top, left, bottom, right);
+#endif
 		[MyNSview unlockFocus];
 	}
 }
@@ -3130,129 +3096,622 @@ LOCALPROC UngrabMachine(void)
 }
 #endif
 
-LOCALPROC MyAdjustGLforSize(int h, int v)
-{
-	[MyNSOpnGLCntxt makeCurrentContext];
-
-	glClearColor (0.0, 0.0, 0.0, 1.0);
-
-#if 1
-	glViewport(0, 0, h, v);
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	glOrtho(0, h, 0, v, -1.0, 1.0);
-	glMatrixMode(GL_MODELVIEW);
-#endif
-
-	glColor3f(0.0, 0.0, 0.0);
-#if EnableMagnify
-	if (UseMagnify) {
-		glPixelZoom(MyWindowScale, - MyWindowScale);
-	} else
-#endif
-	{
-		glPixelZoom(1, -1);
-	}
-	glPixelStorei(GL_UNPACK_ROW_LENGTH, vMacScreenWidth);
-
-	glClear(GL_COLOR_BUFFER_BIT);
-
-	[NSOpenGLContext clearCurrentContext];
-
-	ScreenChangedAll();
-}
+/* OpenGL code removed - Metal only */
 
 LOCALVAR blnr WantScreensChangedCheck = falseblnr;
 
-LOCALPROC MyUpdateOpenGLContext(void)
-{
-	if (nil != MyNSOpnGLCntxt) {
-		[MyNSOpnGLCntxt makeCurrentContext];
-		[MyNSOpnGLCntxt update];
-	}
-}
+/* OpenGL code removed - Metal only */
 
-LOCALPROC CloseMyOpenGLContext(void)
-{
-	if (nil != MyNSOpnGLCntxt) {
+#if USE_METAL
+/* Metal initialization and management */
 
-		[NSOpenGLContext clearCurrentContext];
-		/*
-			Only because MyDrawWithOpenGL doesn't
-			bother to do this. No one
-			uses the current context
-			without settting it first.
-		*/
-	}
-}
-
-LOCALFUNC blnr GetOpnGLCntxt(void)
+LOCALFUNC blnr GetMetalContext(void)
 {
 	blnr v = falseblnr;
 
-	if (nil == MyNSOpnGLCntxt) {
-		NSRect NewWinRect = [MyNSview frame];
-		NSOpenGLPixelFormat *fmt;
+	/* If already initialized, just return success */
+	if (nil != MyMetalDevice && nil != MyMetalPipelineState) {
+		fprintf(stderr, "Metal context already initialized, returning...\n");
+		return trueblnr;
+	}
 
-#if WantGraphicsSwitching
-		{
-			NSOpenGLPixelFormatAttribute attr0[] = {
-				NSOpenGLPFAAllowOfflineRenderers,
-				0};
-
-			fmt =
-				[[NSOpenGLPixelFormat alloc] initWithAttributes:attr0];
-		}
-		if (nil != fmt) {
-			/* ok */
-		} else
-#endif
-		{
-			NSOpenGLPixelFormatAttribute attr[] = {
-				0};
-
-			fmt = [[NSOpenGLPixelFormat alloc] initWithAttributes:attr];
-			if (nil == fmt) {
+		if (nil == MyMetalDevice) {
+		/* Get default Metal device */
+		MyMetalDevice = MTLCreateSystemDefaultDevice();
+		if (nil == MyMetalDevice) {
 #if dbglog_HAVE
-				dbglog_writeln("Could not create fmt");
+			dbglog_writeln("Could not create Metal device");
 #endif
-				goto label_exit;
-			}
+			fprintf(stderr, "Warning: Metal is not supported on this system. "
+				"Falling back to OpenGL.\n");
+			goto label_exit;
 		}
+		
+		/* Log Metal initialization */
+		fprintf(stderr, "=== Metal Rendering Enabled ===\n");
+		fprintf(stderr, "Metal Device: %s\n", [[MyMetalDevice name] UTF8String]);
 
-		MyNSOpnGLCntxt = [[NSOpenGLContext alloc]
-			initWithFormat:fmt shareContext:nil];
-
-		[fmt release];
-
-		if (nil == MyNSOpnGLCntxt) {
+		/* Create command queue */
+		MyMetalCommandQueue = [MyMetalDevice newCommandQueue];
+		if (nil == MyMetalCommandQueue) {
 #if dbglog_HAVE
-			dbglog_writeln("Could not create MyNSOpnGLCntxt");
+			dbglog_writeln("Could not create Metal command queue");
 #endif
 			goto label_exit;
 		}
 
-		/* fprintf(stderr, "%s\n", "Got OpenGL context"); */
-
-		[MyNSOpnGLCntxt setView: MyNSview];
-		[MyNSOpnGLCntxt update];
-
-		/* For Retina displays, we need to set up OpenGL correctly */
-		/* NSView returns logical sizes, but OpenGL needs physical framebuffer size */
-		NSRect backingRect = [MyNSview convertRectToBacking:NewWinRect];
-		
-		MyAdjustGLforSize(backingRect.size.width,
-			backingRect.size.height);
-
-#if 0 != vMacScreenDepth
-		ColorModeWorks = trueblnr;
+		/* Setup CAMetalLayer on the view */
+		NSView *view = MyNSview;
+		if (nil == view) {
+#if dbglog_HAVE
+			dbglog_writeln("MyNSview is nil, cannot setup Metal layer");
 #endif
+			goto label_exit;
+		}
+
+		/* Configure the view's layer */
+		[view setWantsLayer:YES];
+		CALayer *layer = [view layer];
+		if (nil == layer) {
+			layer = [CALayer layer];
+			[view setLayer:layer];
+		}
+
+		/* Create or get CAMetalLayer */
+		if ([layer isKindOfClass:[CAMetalLayer class]]) {
+			MyMetalLayer = (CAMetalLayer *)layer;
+		} else {
+			/* Replace with CAMetalLayer */
+			MyMetalLayer = [CAMetalLayer layer];
+			MyMetalLayer.frame = view.bounds;
+			[view setLayer:MyMetalLayer];
+		}
+
+		/* Configure Metal layer */
+		MyMetalLayer.device = MyMetalDevice;
+		MyMetalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+		MyMetalLayer.framebufferOnly = YES;  /* Optimize for rendering to screen */
+		
+		/* Handle Retina display */
+		NSWindow *window = [view window];
+		if (nil != window) {
+			CGFloat scaleFactor = [window backingScaleFactor];
+			MyMetalLayer.contentsScale = scaleFactor;
+			MyMetalLayer.drawableSize = CGSizeMake(
+				view.bounds.size.width * scaleFactor,
+				view.bounds.size.height * scaleFactor
+			);
+		} else {
+			MyMetalLayer.contentsScale = 1.0;
+			MyMetalLayer.drawableSize = CGSizeMake(
+				view.bounds.size.width,
+				view.bounds.size.height
+			);
+		}
+
+		/* Create texture for screen buffer */
+		NSUInteger textureWidth = vMacScreenWidth;
+		NSUInteger textureHeight = vMacScreenHeight;
+		
+		/* Choose pixel format based on color mode */
+		MTLPixelFormat textureFormat;
+#if 0 != vMacScreenDepth
+		if (UseColorMode) {
+			textureFormat = MTLPixelFormatRGBA8Unorm;
+		} else
+#endif
+		{
+			textureFormat = MTLPixelFormatR8Unorm;  /* Grayscale */
+		}
+		
+		MTLTextureDescriptor *textureDesc = [MTLTextureDescriptor
+			texture2DDescriptorWithPixelFormat:textureFormat
+			width:textureWidth
+			height:textureHeight
+			mipmapped:NO];
+		textureDesc.usage = MTLTextureUsageShaderRead;
+		MyMetalPixelFormat = textureFormat;  /* Store for later use */
+		
+		MyMetalTexture = [MyMetalDevice newTextureWithDescriptor:textureDesc];
+		if (nil == MyMetalTexture) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not create Metal texture");
+#endif
+			goto label_exit;
+		}
+
+		/* Load and compile Metal shaders */
+		if (! LoadMetalShaders()) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not load Metal shaders");
+#endif
+			fprintf(stderr, "ERROR: Could not load Metal shaders\n");
+			goto label_exit;
+		}
+		fprintf(stderr, "Metal shaders loaded successfully\n");
+
+		/* Create render pipeline state */
+		if (! CreateMetalRenderPipeline()) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not create Metal render pipeline");
+#endif
+			fprintf(stderr, "ERROR: Could not create Metal render pipeline\n");
+			goto label_exit;
+		}
+		fprintf(stderr, "Metal render pipeline created successfully\n");
 	}
+
+	v = trueblnr;
+	fprintf(stderr, "Metal context initialized successfully\n");
+	
+	/* Log renderer info after successful initialization */
+	fprintf(stderr, "\n=== Logging renderer info after initialization ===\n");
+	LogRendererInfo();
+
+label_exit:
+	return v;
+}
+
+/* Load Metal shaders - try precompiled library first, fallback to source */
+LOCALFUNC blnr LoadMetalShaders(void)
+{
+	blnr v = falseblnr;
+	NSError *error = nil;
+	
+	/* Try to load precompiled Metal library from bundle */
+	NSBundle *bundle = [NSBundle mainBundle];
+	NSURL *libraryURL = [bundle URLForResource:@"default" withExtension:@"metallib"];
+	
+	if (nil != libraryURL) {
+		/* Load precompiled library */
+		fprintf(stderr, "Loading precompiled Metal shaders...\n");
+		MyMetalLibrary = [MyMetalDevice newLibraryWithURL:libraryURL error:&error];
+		if (nil != MyMetalLibrary) {
+			fprintf(stderr, "Metal shaders loaded successfully (precompiled)\n");
+			v = trueblnr;
+			goto label_exit;
+		}
+#if dbglog_HAVE
+		if (nil != error) {
+			dbglog_writeln([[error localizedDescription] UTF8String]);
+		}
+#endif
+		fprintf(stderr, "Warning: Could not load precompiled library, trying source...\n");
+	}
+	
+	/* Fallback: compile from source file */
+	NSString *shaderPath = [bundle pathForResource:@"shaders" ofType:@"metal"];
+	
+	if (nil == shaderPath) {
+		/* Try in src directory (for development) */
+		NSString *srcPath = [[NSString stringWithUTF8String:__FILE__] stringByDeletingLastPathComponent];
+		shaderPath = [srcPath stringByAppendingPathComponent:@"shaders.metal"];
+	}
+	
+	if (nil == shaderPath || ! [[NSFileManager defaultManager] fileExistsAtPath:shaderPath]) {
+#if dbglog_HAVE
+		dbglog_writeln("Could not find shaders.metal file");
+#endif
+		fprintf(stderr, "ERROR: Could not find default.metallib or shaders.metal\n");
+		goto label_exit;
+	}
+	
+	/* Read shader source */
+	fprintf(stderr, "Compiling Metal shaders from source...\n");
+	NSString *shaderSource = [NSString stringWithContentsOfFile:shaderPath
+	                                                    encoding:NSUTF8StringEncoding
+	                                                       error:&error];
+	if (nil == shaderSource) {
+#if dbglog_HAVE
+		if (nil != error) {
+			dbglog_writeln([[error localizedDescription] UTF8String]);
+		}
+#endif
+		goto label_exit;
+	}
+	
+	/* Compile shaders at runtime */
+	MyMetalLibrary = [MyMetalDevice newLibraryWithSource:shaderSource
+	                                              options:nil
+	                                                error:&error];
+	if (nil == MyMetalLibrary) {
+#if dbglog_HAVE
+		if (nil != error) {
+			dbglog_writeln([[error localizedDescription] UTF8String]);
+		}
+#endif
+		if (nil != error) {
+			fprintf(stderr, "ERROR: Shader compilation failed: %s\n", 
+				[[error localizedDescription] UTF8String]);
+		} else {
+			fprintf(stderr, "ERROR: Shader compilation failed (unknown error)\n");
+		}
+		goto label_exit;
+	}
+	fprintf(stderr, "Metal shaders compiled successfully (from source)\n");
+	
 	v = trueblnr;
 
 label_exit:
 	return v;
 }
+
+/* Create Metal render pipeline state */
+LOCALFUNC blnr CreateMetalRenderPipeline(void)
+{
+	blnr v = falseblnr;
+	NSError *error = nil;
+	
+	if (nil == MyMetalLibrary) {
+		goto label_exit;
+	}
+	
+	/* Get vertex and fragment functions */
+	id<MTLFunction> vertexFunction = [MyMetalLibrary newFunctionWithName:@"vertex_main"];
+	
+	/* Choose fragment shader based on color mode */
+	id<MTLFunction> fragmentFunction;
+#if 0 != vMacScreenDepth
+	if (UseColorMode) {
+		fragmentFunction = [MyMetalLibrary newFunctionWithName:@"fragment_main"];
+	} else
+#endif
+	{
+		/* Try grayscale shader first, fallback to regular */
+		fragmentFunction = [MyMetalLibrary newFunctionWithName:@"fragment_main_grayscale"];
+		if (nil == fragmentFunction) {
+			fragmentFunction = [MyMetalLibrary newFunctionWithName:@"fragment_main"];
+		}
+	}
+	
+	if (nil == vertexFunction || nil == fragmentFunction) {
+#if dbglog_HAVE
+		dbglog_writeln("Could not get Metal shader functions");
+#endif
+		goto label_exit;
+	}
+	
+	/* Create render pipeline descriptor */
+	MTLRenderPipelineDescriptor *pipelineDesc = [[MTLRenderPipelineDescriptor alloc] init];
+	pipelineDesc.vertexFunction = vertexFunction;
+	pipelineDesc.fragmentFunction = fragmentFunction;
+	pipelineDesc.colorAttachments[0].pixelFormat = MyMetalLayer.pixelFormat;
+	
+	/* Create render pipeline state */
+	MyMetalPipelineState = [MyMetalDevice newRenderPipelineStateWithDescriptor:pipelineDesc
+	                                                                      error:&error];
+	if (nil == MyMetalPipelineState) {
+#if dbglog_HAVE
+		if (nil != error) {
+			dbglog_writeln([[error localizedDescription] UTF8String]);
+		}
+#endif
+		goto label_exit;
+	}
+	
+	[vertexFunction release];
+	[fragmentFunction release];
+	[pipelineDesc release];
+	
+	v = trueblnr;
+
+label_exit:
+	return v;
+}
+
+LOCALPROC CloseMyMetalContext(void)
+{
+	if (nil != MyMetalTexture) {
+		MyMetalTexture = nil;
+	}
+	if (nil != MyMetalPipelineState) {
+		MyMetalPipelineState = nil;
+	}
+	if (nil != MyMetalLibrary) {
+		MyMetalLibrary = nil;
+	}
+	if (nil != MyMetalCommandQueue) {
+		MyMetalCommandQueue = nil;
+	}
+	if (nil != MyMetalLayer) {
+		MyMetalLayer = nil;
+	}
+	if (nil != MyMetalDevice) {
+		MyMetalDevice = nil;
+	}
+}
+
+LOCALPROC MyUpdateMetalContext(void)
+{
+	if (nil != MyMetalLayer && nil != MyNSview) {
+		NSWindow *window = [MyNSview window];
+		if (nil != window) {
+			CGFloat scaleFactor = [window backingScaleFactor];
+			MyMetalLayer.contentsScale = scaleFactor;
+			NSRect frame = [MyNSview frame];
+			MyMetalLayer.drawableSize = CGSizeMake(
+				frame.size.width * scaleFactor,
+				frame.size.height * scaleFactor
+			);
+		}
+	}
+}
+
+LOCALPROC MyAdjustMetalForSize(int h, int v)
+{
+	if (nil != MyMetalLayer && nil != MyNSview) {
+		NSWindow *window = [MyNSview window];
+		if (nil != window) {
+			CGFloat scaleFactor = [window backingScaleFactor];
+			MyMetalLayer.drawableSize = CGSizeMake(h * scaleFactor, v * scaleFactor);
+		} else {
+			MyMetalLayer.drawableSize = CGSizeMake(h, v);
+		}
+	}
+}
+
+/* Performance profiling (optional) */
+#if 0  /* Set to 1 to enable performance profiling */
+#define METAL_PROFILE 1
+#endif
+
+#if METAL_PROFILE
+#include <mach/mach_time.h>
+
+LOCALVAR uint64_t gMetalFrameCount = 0;
+LOCALVAR uint64_t gMetalTotalTime = 0;
+LOCALVAR uint64_t gMetalTextureUpdateTime = 0;
+LOCALVAR uint64_t gMetalRenderTime = 0;
+
+LOCALFUNC uint64_t GetTimeNanoseconds(void)
+{
+	static mach_timebase_info_data_t timebase;
+	if (timebase.denom == 0) {
+		mach_timebase_info(&timebase);
+	}
+	return mach_absolute_time() * timebase.numer / timebase.denom;
+}
+
+LOCALPROC LogMetalPerformance(void)
+{
+	if (gMetalFrameCount > 0) {
+		double avgFrameTime = (double)gMetalTotalTime / gMetalFrameCount / 1000000.0;  /* ms */
+		double avgTextureTime = (double)gMetalTextureUpdateTime / gMetalFrameCount / 1000000.0;
+		double avgRenderTime = (double)gMetalRenderTime / gMetalFrameCount / 1000000.0;
+		double fps = 1000.0 / avgFrameTime;
+		
+		fprintf(stderr, "\n=== Metal Performance Stats ===\n");
+		fprintf(stderr, "Frames: %llu\n", (unsigned long long)gMetalFrameCount);
+		fprintf(stderr, "Avg Frame Time: %.3f ms (%.1f FPS)\n", avgFrameTime, fps);
+		fprintf(stderr, "Avg Texture Update: %.3f ms\n", avgTextureTime);
+		fprintf(stderr, "Avg Render Time: %.3f ms\n", avgRenderTime);
+		fprintf(stderr, "==============================\n\n");
+	}
+}
+#endif
+
+/* Metal rendering function */
+LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
+{
+#if METAL_PROFILE
+	uint64_t frameStart = GetTimeNanoseconds();
+	uint64_t textureStart, textureEnd, renderStart, renderEnd;
+#endif
+
+	if (nil == MyMetalDevice || nil == MyMetalLayer || nil == MyMetalPipelineState) {
+		/* Metal not initialized */
+		return;
+	}
+
+	/* Update luminance buffer (same as OpenGL version) */
+	UpdateLuminanceCopy(top, left, bottom, right);
+
+	/* Get drawable from Metal layer */
+	id<CAMetalDrawable> drawable = [MyMetalLayer nextDrawable];
+	if (nil == drawable) {
+		/* Could not get drawable, skip this frame */
+		return;
+	}
+
+	/* Update texture with screen buffer data */
+#if METAL_PROFILE
+	textureStart = GetTimeNanoseconds();
+#endif
+	if (nil != MyMetalTexture && nil != ScalingBuff) {
+		/* Calculate region to update */
+		NSUInteger width = right - left;
+		NSUInteger height = bottom - top;
+		NSUInteger bytesPerRow;
+		const void *sourceData;
+		
+#if 0 != vMacScreenDepth
+		if (UseColorMode) {
+			/* Color mode: RGBA, 4 bytes per pixel */
+			bytesPerRow = vMacScreenWidth * 4;
+			sourceData = ScalingBuff + (left + top * vMacScreenWidth) * 4;
+		} else
+#endif
+		{
+			/* Grayscale mode: 1 byte per pixel */
+			bytesPerRow = vMacScreenWidth;
+			sourceData = ScalingBuff + (left + top * vMacScreenWidth);
+		}
+
+		/* Update texture region */
+		MTLRegion region = {
+			.origin = { left, top, 0 },
+			.size = { width, height, 1 }
+		};
+
+		[MyMetalTexture replaceRegion:region
+		                   mipmapLevel:0
+		                     withBytes:sourceData
+		                   bytesPerRow:bytesPerRow];
+	}
+#if METAL_PROFILE
+	textureEnd = GetTimeNanoseconds();
+	gMetalTextureUpdateTime += (textureEnd - textureStart);
+	renderStart = GetTimeNanoseconds();
+#endif
+
+	/* Create command buffer */
+	id<MTLCommandBuffer> commandBuffer = [MyMetalCommandQueue commandBuffer];
+	if (nil == commandBuffer) {
+		return;
+	}
+
+	/* Create render pass descriptor (reuse for better performance) */
+	static MTLRenderPassDescriptor *cachedRenderPassDesc = nil;
+	MTLRenderPassDescriptor *renderPassDesc;
+	
+	if (nil == cachedRenderPassDesc) {
+		cachedRenderPassDesc = [MTLRenderPassDescriptor renderPassDescriptor];
+		if (nil == cachedRenderPassDesc) {
+			return;
+		}
+		cachedRenderPassDesc.colorAttachments[0].loadAction = MTLLoadActionClear;
+		cachedRenderPassDesc.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
+		cachedRenderPassDesc.colorAttachments[0].storeAction = MTLStoreActionStore;
+	}
+	
+	renderPassDesc = cachedRenderPassDesc;
+	renderPassDesc.colorAttachments[0].texture = drawable.texture;
+
+	/* Create render command encoder */
+	id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDesc];
+	if (nil == renderEncoder) {
+		return;
+	}
+
+	/* Set render pipeline state */
+	[renderEncoder setRenderPipelineState:MyMetalPipelineState];
+
+	/* Set texture */
+	if (nil != MyMetalTexture) {
+		[renderEncoder setFragmentTexture:MyMetalTexture atIndex:0];
+	}
+	
+	/* Set viewport to match drawable exactly */
+	/* In fullscreen, use actual drawable texture size for accurate centering */
+	CGSize drawableSize;
+	if (drawable.texture.width > 0 && drawable.texture.height > 0) {
+		/* Use actual drawable texture dimensions - most accurate */
+		drawableSize = CGSizeMake(drawable.texture.width, drawable.texture.height);
+	} else {
+		/* Fallback to layer drawableSize */
+		drawableSize = MyMetalLayer.drawableSize;
+	}
+	
+	/* Ensure viewport starts at (0,0) and matches drawable exactly */
+	/* This is critical for fullscreen centering */
+	MTLViewport viewport = {
+		.originX = 0.0,
+		.originY = 0.0,
+		.width = drawableSize.width,
+		.height = drawableSize.height,
+		.znear = 0.0,
+		.zfar = 1.0
+	};
+	[renderEncoder setViewport:viewport];
+	
+	/* Set vertex buffer for viewport and texture sizes (for aspect ratio preservation) */
+	/* Use drawableSize for aspect ratio calculation to match viewport exactly */
+	/* This ensures correct centering in fullscreen mode */
+	float viewportSize[2] = {
+		(float)drawableSize.width,
+		(float)drawableSize.height
+	};
+	float textureSize[2] = {
+		(float)vMacScreenWidth,
+		(float)vMacScreenHeight
+	};
+	
+	/* Use linear filtering for smooth scaling when window is resized */
+	/* Use nearest neighbor for pixel-perfect when window matches native size */
+	NSRect viewBounds = [MyNSview bounds];
+	BOOL useSmoothFiltering = (viewBounds.size.width != vMacScreenWidth || 
+	                           viewBounds.size.height != vMacScreenHeight);
+	
+	/* Set vertex buffers */
+	id<MTLBuffer> viewportBuffer = [MyMetalDevice newBufferWithBytes:viewportSize
+	                                                           length:sizeof(viewportSize)
+	                                                          options:MTLResourceStorageModeShared];
+	id<MTLBuffer> textureBuffer = [MyMetalDevice newBufferWithBytes:textureSize
+	                                                          length:sizeof(textureSize)
+	                                                         options:MTLResourceStorageModeShared];
+	
+	if (nil != viewportBuffer && nil != textureBuffer) {
+		[renderEncoder setVertexBuffer:viewportBuffer offset:0 atIndex:0];
+		[renderEncoder setVertexBuffer:textureBuffer offset:0 atIndex:1];
+		
+		/* Set fragment buffer for filtering mode */
+		BOOL smoothFilter = useSmoothFiltering;
+		id<MTLBuffer> filterBuffer = [MyMetalDevice newBufferWithBytes:&smoothFilter
+		                                                         length:sizeof(BOOL)
+		                                                        options:MTLResourceStorageModeShared];
+		if (nil != filterBuffer) {
+			[renderEncoder setFragmentBuffer:filterBuffer offset:0 atIndex:0];
+		}
+	}
+
+	/* Draw full-screen quad (4 vertices = 2 triangles) */
+	[renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
+	                   vertexStart:0
+	                   vertexCount:4];
+
+	/* End encoding */
+	[renderEncoder endEncoding];
+
+	/* Present drawable */
+	[commandBuffer presentDrawable:drawable];
+
+	/* Commit command buffer */
+	[commandBuffer commit];
+	
+#if METAL_PROFILE
+	renderEnd = GetTimeNanoseconds();
+	gMetalRenderTime += (renderEnd - renderStart);
+	
+	uint64_t frameEnd = GetTimeNanoseconds();
+	gMetalTotalTime += (frameEnd - frameStart);
+	gMetalFrameCount++;
+	
+	/* Log performance every 60 frames */
+	if (gMetalFrameCount % 60 == 0) {
+		LogMetalPerformance();
+	}
+#endif
+}
+
+/* Debug function to check which renderer is active */
+LOCALPROC LogRendererInfo(void)
+{
+#if USE_METAL
+	fprintf(stderr, "\n=== RENDERER INFO ===\n");
+	fprintf(stderr, "Active Renderer: METAL\n");
+	if (nil != MyMetalDevice) {
+		fprintf(stderr, "Metal Device: %s\n", [[MyMetalDevice name] UTF8String]);
+		fprintf(stderr, "Metal Layer: %s\n", (nil != MyMetalLayer) ? "Initialized" : "Not initialized");
+		fprintf(stderr, "Metal Pipeline: %s\n", (nil != MyMetalPipelineState) ? "Ready" : "Not ready");
+	} else {
+		fprintf(stderr, "Metal Device: Not initialized\n");
+	}
+	fprintf(stderr, "===================\n\n");
+#else
+	fprintf(stderr, "\n=== RENDERER INFO ===\n");
+	fprintf(stderr, "Active Renderer: OPENGL\n");
+	if (nil != MyNSOpnGLCntxt) {
+		fprintf(stderr, "OpenGL Context: Initialized\n");
+	} else {
+		fprintf(stderr, "OpenGL Context: Not initialized\n");
+	}
+	fprintf(stderr, "===================\n\n");
+#endif
+}
+
+#endif /* USE_METAL */
+
+/* OpenGL code removed - Metal only */
 
 typedef NSUInteger (*modifierFlagsProcPtr)
 	(id self, SEL cmd);
@@ -3333,23 +3792,36 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 			[sender draggingSourceOperationMask];
 	*/
 
-	if ([[pboard types] containsObject:NSFilenamesPboardType]) {
+	/* Try NSURLPboardType first (modern API) */
+	if ([[pboard types] containsObject: NSURLPboardType]) {
+		NSURL *fileURL = [NSURL URLFromPasteboard: pboard];
+		if (nil != fileURL) {
+			NSString* filePath = [fileURL path];
+			if (nil != filePath) {
+				Sony_ResolveInsert(filePath);
+				v = YES;
+			}
+		}
+	}
+	
+	/* Fallback to NSFilenamesPboardType (deprecated but still works) */
+	if (!v && [[pboard types] containsObject:NSFilenamesPboardType]) {
 		int i;
 		NSArray *file_names =
 			[pboard propertyListForType: NSFilenamesPboardType];
-		int n = [file_names count];
+		if (nil != file_names) {
+			int n = [file_names count];
 
-		for (i = 0; i < n; ++i) {
-			NSString *filePath = [file_names objectAtIndex:i];
-			Sony_ResolveInsert(filePath);
+			for (i = 0; i < n; ++i) {
+				NSString *filePath = [file_names objectAtIndex:i];
+				if (nil != filePath) {
+					Sony_ResolveInsert(filePath);
+					v = YES;
+				}
+			}
 		}
-		v = YES;
-	} else if ([[pboard types] containsObject: NSURLPboardType]) {
-		NSURL *fileURL = [NSURL URLFromPasteboard: pboard];
-		NSString* filePath = [fileURL path];
-		Sony_ResolveInsert(filePath);
-		v = YES;
 	}
+	
 
 	if (v && gTrueBackgroundFlag) {
 		{
@@ -3396,6 +3868,26 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 	gTrueBackgroundFlag = trueblnr;
 }
 
+- (void)windowDidResize:(NSNotification *)aNotification
+{
+	/* Update Metal layer size when window is resized */
+#if USE_METAL
+	MyUpdateMetalContext();
+	/* Trigger redraw */
+	ScreenChangedAll();
+#endif
+}
+
+- (void)windowDidChangeScreen:(NSNotification *)aNotification
+{
+	/* Update Metal layer when screen changes (e.g., fullscreen transition) */
+#if USE_METAL
+	MyUpdateMetalContext();
+	/* Trigger redraw */
+	ScreenChangedAll();
+#endif
+}
+
 @end
 
 @interface MyClassView : NSView
@@ -3423,9 +3915,16 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 		And if create after then our content won't
 		be drawn initially, resulting in flicker.
 	*/
-	if (GetOpnGLCntxt()) {
-		MyDrawWithOpenGL(0, 0, vMacScreenHeight, vMacScreenWidth);
+#if USE_METAL
+	fprintf(stderr, "Initializing Metal context...\n");
+	if (GetMetalContext()) {
+		fprintf(stderr, "Metal context obtained, logging renderer info...\n");
+		/* Log renderer info on startup - always call this */
+		LogRendererInfo();
+	} else {
+		fprintf(stderr, "ERROR: Failed to initialize Metal context\n");
 	}
+#endif
 }
 
 @end
@@ -3468,10 +3967,7 @@ LOCALPROC CloseMainWindow(void)
 	}
 #endif
 
-	if (nil != MyNSOpnGLCntxt) {
-		[MyNSOpnGLCntxt release];
-		MyNSOpnGLCntxt = nil;
-	}
+/* OpenGL code removed - Metal only */
 }
 
 LOCALPROC QZ_SetCaption(void)
@@ -3600,13 +4096,12 @@ LOCALFUNC blnr CreateMainWindow(void)
 	{
 		NewWinRect = AllScrnBounds;
 
-		GLhOffset = botleftPos.x - AllScrnBounds.origin.x;
-		GLvOffset = (botleftPos.y - AllScrnBounds.origin.y)
+		/* OpenGL offsets removed - Metal doesn't need them */
+		hOffset = botleftPos.x - AllScrnBounds.origin.x;
+		vOffset = AllScrnBounds.size.height - 
+			((botleftPos.y - AllScrnBounds.origin.y)
 			+ ((NewWindowHeight < MainScrnBounds.size.height)
-				? NewWindowHeight : MainScrnBounds.size.height);
-
-		hOffset = GLhOffset;
-		vOffset = AllScrnBounds.size.height - GLvOffset;
+				? NewWindowHeight : MainScrnBounds.size.height));
 
 		style = NSBorderlessWindowMask;
 	}
@@ -3639,11 +4134,11 @@ LOCALFUNC blnr CreateMainWindow(void)
 				NewWindowWidth, NewWindowHeight);
 		}
 
-		GLhOffset = 0;
-		GLvOffset = NewWindowHeight;
+		/* OpenGL offsets removed - Metal doesn't need them */
 
 		style = NSTitledWindowMask
-			| NSMiniaturizableWindowMask | NSClosableWindowMask;
+			| NSMiniaturizableWindowMask | NSClosableWindowMask
+			| NSResizableWindowMask;
 
 		CurWinIndx = WinIndx;
 	}
@@ -3672,9 +4167,12 @@ LOCALFUNC blnr CreateMainWindow(void)
 	[MyWindow setAcceptsMouseMovedEvents: YES];
 	[MyWindow setViewsNeedDisplay: NO];
 
+#if EnableDragDrop
+	/* Register for drag and drop (disk images) - before setting content view */
 	[MyWindow registerForDraggedTypes:
 		[NSArray arrayWithObjects:
 			NSURLPboardType, NSFilenamesPboardType, nil]];
+#endif
 
 	MyWinDelegate = [[MyClassWindowDelegate alloc] init];
 	if (nil == MyWinDelegate) {
@@ -3697,9 +4195,16 @@ LOCALFUNC blnr CreateMainWindow(void)
 	[MyWindow makeKeyAndOrderFront: nil];
 
 	/* just in case drawRect didn't get called */
+#if USE_METAL
+	if (! GetMetalContext()) {
+#if dbglog_HAVE
+		dbglog_writeln("Could not GetMetalContext");
+#endif
+#else
 	if (! GetOpnGLCntxt()) {
 #if dbglog_HAVE
 		dbglog_writeln("Could not GetOpnGLCntxt");
+#endif
 #endif
 		goto label_exit;
 	}
@@ -3740,7 +4245,7 @@ LOCALPROC ZapMyWState(void)
 	MyCGcontext = nil;
 	MyPixels = NULL;
 #endif
-	MyNSOpnGLCntxt = nil;
+	/* OpenGL code removed - Metal only */
 }
 #endif
 
@@ -3773,9 +4278,7 @@ struct MyWState {
 	ui4b f_MyPitch;
 	ui3b f_MyBytesPerPixel;
 #endif
-	NSOpenGLContext *f_MyNSOpnGLCntxt;
-	short f_GLhOffset;
-	short f_GLvOffset;
+	/* OpenGL fields removed - Metal only */
 };
 typedef struct MyWState MyWState;
 #endif
@@ -3810,9 +4313,7 @@ LOCALPROC GetMyWState(MyWState *r)
 	r->f_MyPitch = MyPitch;
 	r->f_MyBytesPerPixel = MyBytesPerPixel;
 #endif
-	r->f_MyNSOpnGLCntxt = MyNSOpnGLCntxt;
-	r->f_GLhOffset = GLhOffset;
-	r->f_GLvOffset = GLvOffset;
+	/* OpenGL fields removed - Metal only */
 }
 #endif
 
@@ -3846,9 +4347,7 @@ LOCALPROC SetMyWState(MyWState *r)
 	MyPitch = r->f_MyPitch;
 	MyBytesPerPixel = r->f_MyBytesPerPixel;
 #endif
-	MyNSOpnGLCntxt = r->f_MyNSOpnGLCntxt;
-	GLhOffset = r->f_GLhOffset;
-	GLvOffset = r->f_GLvOffset;
+	/* OpenGL code removed - Metal only */
 }
 #endif
 
@@ -3879,7 +4378,11 @@ LOCALPROC ReCreateMainWindow(void)
 	}
 #endif
 
+#if USE_METAL
+	CloseMyMetalContext();
+#else
 	CloseMyOpenGLContext();
+#endif
 
 	GetMyWState(&old_state);
 
@@ -3912,17 +4415,27 @@ LOCALPROC ReCreateMainWindow(void)
 		WantMagnify = UseMagnify;
 #endif
 
-	} else {
-		GetMyWState(&new_state);
-		SetMyWState(&old_state);
-		CloseMainWindow();
-		SetMyWState(&new_state);
+		} else {
+			GetMyWState(&new_state);
+			SetMyWState(&old_state);
+			CloseMainWindow();
+			SetMyWState(&new_state);
 
-		if (HadCursorHidden) {
-			(void) MyMoveMouse(CurMouseH, CurMouseV);
+			if (HadCursorHidden) {
+				(void) MyMoveMouse(CurMouseH, CurMouseV);
+			}
+			
+#if USE_METAL
+			/* Reinitialize Metal context after window recreation */
+			/* This ensures Metal layer is properly sized for new window/fullscreen */
+			if (nil != MyNSview) {
+				GetMetalContext();
+				/* Update Metal layer size immediately after fullscreen transition */
+				MyUpdateMetalContext();
+			}
+#endif
 		}
 	}
-}
 #endif
 
 #if VarFullScreen && EnableMagnify
@@ -4006,6 +4519,9 @@ LOCALPROC LeaveBackground(void)
 	ReconnectKeyCodes3();
 	DisableKeyRepeat();
 	EmulationWasInterrupted = trueblnr;
+	
+	/* Don't need to restart - it was already running */
+	/* CurSpeedStopped = falseblnr;  // Removed - allow background execution */
 }
 
 LOCALPROC EnterBackground(void)
@@ -4014,6 +4530,9 @@ LOCALPROC EnterBackground(void)
 	DisconnectKeyCodes3();
 
 	ForceShowCursor();
+	
+	/* Don't stop emulation in background - keep it running */
+	/* CurSpeedStopped = trueblnr;  // Removed - allow background execution */
 }
 
 LOCALPROC LeaveSpeedStopped(void)
@@ -4234,7 +4753,11 @@ LOCALPROC CheckForSavedTasks(void)
 	if (WantScreensChangedCheck) {
 		WantScreensChangedCheck = falseblnr;
 
+#if USE_METAL
+		MyUpdateMetalContext();
+#else
 		MyUpdateOpenGLContext();
+#endif
 
 #if VarFullScreen
 		/*
@@ -4251,13 +4774,9 @@ LOCALPROC CheckForSavedTasks(void)
 #endif
 	}
 
-	if (CurSpeedStopped != (SpeedStopped ||
-		(gBackgroundFlag && ! RunInBackground
-#if EnableAutoSlow && 0
-			&& (QuietSubTicks >= 4092)
-#endif
-		)))
-	{
+	/* Allow background execution - don't stop emulation when window loses focus */
+	/* Only stop if explicitly requested (SpeedStopped) */
+	if (CurSpeedStopped != SpeedStopped) {
 		CurSpeedStopped = ! CurSpeedStopped;
 		if (CurSpeedStopped) {
 			EnterSpeedStopped();
@@ -4548,9 +5067,12 @@ label_retry:
 		goto label_exit;
 	}
 
+	/* Allow background execution - don't block on event loop when stopped */
+	/* Only stop drawing when explicitly stopped, but still process events */
 	if (CurSpeedStopped) {
 		DoneWithDrawingForTick();
-		TheUntil = TheDistantFuture;
+		/* Don't wait forever - allow background processing */
+		TheUntil = TheDistantPast;  /* Changed from TheDistantFuture to allow processing */
 		goto label_retry;
 	}
 
@@ -4986,7 +5508,11 @@ LOCALPROC UnInitOSGLU(void)
 
 	CheckSavedMacMsg();
 
+#if USE_METAL
+	CloseMyMetalContext();
+#else
 	CloseMyOpenGLContext();
+#endif
 	CloseMainWindow();
 
 #if MayFullScreen

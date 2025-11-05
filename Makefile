@@ -70,6 +70,7 @@ minivmac.app/Contents/Resources/ICONAPPO.icns : src/ICONAPPO.icns
 	mkdir "AppTemp/Contents/Resources/English.lproj/"
 	cp "src/ICONAPPO.icns" "AppTemp/Contents/Resources/"
 	cp "cfg/Info.plist" "AppTemp/Contents/"
+	cp "src/shaders.metal" "AppTemp/Contents/Resources//shaders.metal" 2>/dev/null || true
 	printf "dummy\n" > "AppTemp/Contents/Resources/English.lproj/dummy.txt"
 	printf "APPL????" > "AppTemp/Contents/PkgInfo"
 	mv "AppTemp/" "minivmac.app/"
@@ -77,7 +78,7 @@ minivmac.app/Contents/Resources/ICONAPPO.icns : src/ICONAPPO.icns
 minivmac.app/Contents/MacOS/minivmac : $(ObjFiles) minivmac.app/Contents/Resources/ICONAPPO.icns
 	gcc \
 		-o "minivmac.app/Contents/MacOS/minivmac" \
-		$(ObjFiles) -framework AppKit -framework AudioUnit -framework OpenGL
+		$(ObjFiles) -framework AppKit -framework AudioUnit -framework Metal -framework QuartzCore
 
 clean :
 	rm -f $(ObjFiles)

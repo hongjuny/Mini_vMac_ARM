@@ -10,7 +10,6 @@
 #import <Cocoa/Cocoa.h>
 #include <CoreAudio/CoreAudio.h>
 #include <AudioUnit/AudioUnit.h>
-#include <OpenGL/gl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

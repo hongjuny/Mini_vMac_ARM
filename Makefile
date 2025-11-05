@@ -5,7 +5,8 @@
 mk_ArchFlags = -arch arm64
 mk_COptionsCommon = -c $(mk_ArchFlags) -Wall -Wmissing-prototypes -Wno-uninitialized -Wundef -Wstrict-prototypes -Icfg/ -Isrc/
 # Optimization flags: -Os (optimize for size), -flto (link-time optimization)
-mk_COptionsOSGLU = $(mk_COptionsCommon) -Os -flto
+# Enable Metal rendering (set to 1 to use Metal, 0 for OpenGL)
+mk_COptionsOSGLU = $(mk_COptionsCommon) -Os -flto -DUSE_METAL=1
 mk_COptions = $(mk_COptionsCommon) -Os -flto
 
 .PHONY: TheDefaultOutput clean

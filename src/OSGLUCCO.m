@@ -1281,7 +1281,12 @@ LOCALVAR id<MTLCommandQueue> MyMetalCommandQueue = nil;
 LOCALVAR CAMetalLayer *MyMetalLayer = nil;
 LOCALVAR id<MTLTexture> MyMetalTexture = nil;
 LOCALVAR id<MTLRenderPipelineState> MyMetalPipelineState = nil;
+LOCALVAR id<MTLLibrary> MyMetalLibrary = nil;
 LOCALVAR MTLPixelFormat MyMetalPixelFormat = MTLPixelFormatRGBA8Unorm;
+
+/* Forward declarations for Metal shader functions */
+LOCALFUNC blnr LoadMetalShaders(void);
+LOCALFUNC blnr CreateMetalRenderPipeline(void);
 #endif
 
 /* OpenGL rendering (fallback or legacy) */
@@ -3360,10 +3365,127 @@ LOCALFUNC blnr GetMetalContext(void)
 			goto label_exit;
 		}
 
-		/* TODO: Create render pipeline state (will be done in Phase 2) */
-		/* For now, just mark as initialized */
+		/* Load and compile Metal shaders */
+		if (! LoadMetalShaders()) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not load Metal shaders");
+#endif
+			goto label_exit;
+		}
+
+		/* Create render pipeline state */
+		if (! CreateMetalRenderPipeline()) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not create Metal render pipeline");
+#endif
+			goto label_exit;
+		}
 	}
 
+	v = trueblnr;
+
+label_exit:
+	return v;
+}
+
+/* Load Metal shaders from source file */
+LOCALFUNC blnr LoadMetalShaders(void)
+{
+	blnr v = falseblnr;
+	NSError *error = nil;
+	
+	/* Get path to shader source file */
+	NSBundle *bundle = [NSBundle mainBundle];
+	NSString *shaderPath = [bundle pathForResource:@"shaders" ofType:@"metal"];
+	
+	if (nil == shaderPath) {
+		/* Try in src directory (for development) */
+		NSString *srcPath = [[NSString stringWithUTF8String:__FILE__] stringByDeletingLastPathComponent];
+		shaderPath = [srcPath stringByAppendingPathComponent:@"shaders.metal"];
+		
+		if (! [[NSFileManager defaultManager] fileExistsAtPath:shaderPath]) {
+#if dbglog_HAVE
+			dbglog_writeln("Could not find shaders.metal file");
+#endif
+			goto label_exit;
+		}
+	}
+	
+	/* Read shader source */
+	NSString *shaderSource = [NSString stringWithContentsOfFile:shaderPath
+	                                                    encoding:NSUTF8StringEncoding
+	                                                       error:&error];
+	if (nil == shaderSource) {
+#if dbglog_HAVE
+		if (nil != error) {
+			dbglog_writeln([[error localizedDescription] UTF8String]);
+		}
+#endif
+		goto label_exit;
+	}
+	
+	/* Compile shaders */
+	MyMetalLibrary = [MyMetalDevice newLibraryWithSource:shaderSource
+	                                              options:nil
+	                                                error:&error];
+	if (nil == MyMetalLibrary) {
+#if dbglog_HAVE
+		if (nil != error) {
+			dbglog_writeln([[error localizedDescription] UTF8String]);
+		}
+#endif
+		goto label_exit;
+	}
+	
+	v = trueblnr;
+
+label_exit:
+	return v;
+}
+
+/* Create Metal render pipeline state */
+LOCALFUNC blnr CreateMetalRenderPipeline(void)
+{
+	blnr v = falseblnr;
+	NSError *error = nil;
+	
+	if (nil == MyMetalLibrary) {
+		goto label_exit;
+	}
+	
+	/* Get vertex and fragment functions */
+	id<MTLFunction> vertexFunction = [MyMetalLibrary newFunctionWithName:@"vertex_main"];
+	id<MTLFunction> fragmentFunction = [MyMetalLibrary newFunctionWithName:@"fragment_main"];
+	
+	if (nil == vertexFunction || nil == fragmentFunction) {
+#if dbglog_HAVE
+		dbglog_writeln("Could not get Metal shader functions");
+#endif
+		goto label_exit;
+	}
+	
+	/* Create render pipeline descriptor */
+	MTLRenderPipelineDescriptor *pipelineDesc = [[MTLRenderPipelineDescriptor alloc] init];
+	pipelineDesc.vertexFunction = vertexFunction;
+	pipelineDesc.fragmentFunction = fragmentFunction;
+	pipelineDesc.colorAttachments[0].pixelFormat = MyMetalLayer.pixelFormat;
+	
+	/* Create render pipeline state */
+	MyMetalPipelineState = [MyMetalDevice newRenderPipelineStateWithDescriptor:pipelineDesc
+	                                                                      error:&error];
+	if (nil == MyMetalPipelineState) {
+#if dbglog_HAVE
+		if (nil != error) {
+			dbglog_writeln([[error localizedDescription] UTF8String]);
+		}
+#endif
+		goto label_exit;
+	}
+	
+	[vertexFunction release];
+	[fragmentFunction release];
+	[pipelineDesc release];
+	
 	v = trueblnr;
 
 label_exit:
@@ -3377,6 +3499,9 @@ LOCALPROC CloseMyMetalContext(void)
 	}
 	if (nil != MyMetalPipelineState) {
 		MyMetalPipelineState = nil;
+	}
+	if (nil != MyMetalLibrary) {
+		MyMetalLibrary = nil;
 	}
 	if (nil != MyMetalCommandQueue) {
 		MyMetalCommandQueue = nil;

@@ -4144,6 +4144,13 @@ LOCALFUNC blnr CreateMainWindow(void)
 	}
 	[MyWindow setContentView: MyNSview];
 
+#if EnableDragDrop
+	/* Register for drag and drop (disk images) */
+	[MyNSview registerForDraggedTypes:
+		[NSArray arrayWithObjects:
+			NSURLPboardType, NSFilenamesPboardType, nil]];
+#endif
+
 	[MyWindow makeKeyAndOrderFront: nil];
 
 	/* just in case drawRect didn't get called */

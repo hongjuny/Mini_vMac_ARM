@@ -21,12 +21,12 @@
 
 
 #ifndef kMaintainerName
-#define kMaintainerName "unknown"
+#define kMaintainerName "Hong-Jun Yoon"
 #endif
 
 
 #ifndef kStrHomePage
-#define kStrHomePage "(unknown)"
+#define kStrHomePage "https://github.com/hongjuny/Mini_vMac_ARM"
 #endif
 
 

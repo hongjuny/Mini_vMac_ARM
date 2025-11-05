@@ -1288,6 +1288,7 @@ LOCALVAR MTLPixelFormat MyMetalPixelFormat = MTLPixelFormatRGBA8Unorm;
 LOCALFUNC blnr LoadMetalShaders(void);
 LOCALFUNC blnr CreateMetalRenderPipeline(void);
 LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right);
+LOCALPROC LogRendererInfo(void);
 #endif
 
 /* OpenGL rendering (fallback or legacy) */
@@ -3277,6 +3278,12 @@ LOCALFUNC blnr GetMetalContext(void)
 {
 	blnr v = falseblnr;
 
+	/* If already initialized, just return success */
+	if (nil != MyMetalDevice && nil != MyMetalPipelineState) {
+		fprintf(stderr, "Metal context already initialized, returning...\n");
+		return trueblnr;
+	}
+
 		if (nil == MyMetalDevice) {
 		/* Get default Metal device */
 		MyMetalDevice = MTLCreateSystemDefaultDevice();
@@ -3387,19 +3394,28 @@ LOCALFUNC blnr GetMetalContext(void)
 #if dbglog_HAVE
 			dbglog_writeln("Could not load Metal shaders");
 #endif
+			fprintf(stderr, "ERROR: Could not load Metal shaders\n");
 			goto label_exit;
 		}
+		fprintf(stderr, "Metal shaders loaded successfully\n");
 
 		/* Create render pipeline state */
 		if (! CreateMetalRenderPipeline()) {
 #if dbglog_HAVE
 			dbglog_writeln("Could not create Metal render pipeline");
 #endif
+			fprintf(stderr, "ERROR: Could not create Metal render pipeline\n");
 			goto label_exit;
 		}
+		fprintf(stderr, "Metal render pipeline created successfully\n");
 	}
 
 	v = trueblnr;
+	fprintf(stderr, "Metal context initialized successfully\n");
+	
+	/* Log renderer info after successful initialization */
+	fprintf(stderr, "\n=== Logging renderer info after initialization ===\n");
+	LogRendererInfo();
 
 label_exit:
 	return v;
@@ -3442,6 +3458,7 @@ LOCALFUNC blnr LoadMetalShaders(void)
 	}
 	
 	/* Compile shaders */
+	fprintf(stderr, "Compiling Metal shaders...\n");
 	MyMetalLibrary = [MyMetalDevice newLibraryWithSource:shaderSource
 	                                              options:nil
 	                                                error:&error];
@@ -3451,8 +3468,15 @@ LOCALFUNC blnr LoadMetalShaders(void)
 			dbglog_writeln([[error localizedDescription] UTF8String]);
 		}
 #endif
+		if (nil != error) {
+			fprintf(stderr, "ERROR: Shader compilation failed: %s\n", 
+				[[error localizedDescription] UTF8String]);
+		} else {
+			fprintf(stderr, "ERROR: Shader compilation failed (unknown error)\n");
+		}
 		goto label_exit;
 	}
+	fprintf(stderr, "Metal shaders compiled successfully\n");
 	
 	v = trueblnr;
 
@@ -3948,9 +3972,13 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 		be drawn initially, resulting in flicker.
 	*/
 #if USE_METAL
+	fprintf(stderr, "Initializing Metal context...\n");
 	if (GetMetalContext()) {
-		/* Log renderer info on startup */
+		fprintf(stderr, "Metal context obtained, logging renderer info...\n");
+		/* Log renderer info on startup - always call this */
 		LogRendererInfo();
+	} else {
+		fprintf(stderr, "ERROR: Failed to initialize Metal context\n");
 	}
 #else
 	if (GetOpnGLCntxt()) {

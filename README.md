@@ -42,7 +42,7 @@ The application will be created at `minivmac.app`.
 ## Changelog
 
 ### 2025-11-05
-- **Metal Graphics Rendering Migration** 🎨
+- **Metal Graphics Rendering Migration**
   - Complete migration from deprecated OpenGL to Apple's Metal framework
   - Implemented Metal vertex and fragment shaders for rendering
   - Added aspect ratio preservation with automatic letterboxing/pillarboxing
@@ -50,19 +50,19 @@ The application will be created at `minivmac.app`.
   - Removed all OpenGL dependencies and code
   - Result: Modern, future-proof rendering with better performance and compatibility
 
-- **Window Management Improvements** 🪟
+- **Window Management Improvements**
   - **Resizable Window**: Window can now be resized by dragging edges/corners
   - **Fullscreen Alignment**: Fixed pixel plane centering in fullscreen mode
   - **Screen Stretching**: Pixel plane now stretches to fit window size while maintaining aspect ratio
   - Proper viewport sizing for accurate rendering at any window size
 
-- **Background Execution** 🎵
+- **Background Execution**
   - Emulator continues running when app loses focus (goes to background)
   - Audio playback continues in background
   - Configurable via `WantInitRunInBackground` setting
   - Result: Can listen to music or run processes while using other apps
 
-- **Bug Fixes** 🐛
+- **Bug Fixes**
   - Fixed drag and drop registration (restored to original window-based registration)
   - Fixed Metal layer initialization after window recreation
   - Improved screen change notification handling for fullscreen transitions

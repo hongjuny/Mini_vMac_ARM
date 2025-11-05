@@ -7,7 +7,10 @@ Native ARM64 build of Mini vMac (Macintosh Plus emulator) optimized for modern m
 ## Features
 
 - **Native Apple Silicon Support**: Compiled for ARM64 architecture (M1/M2/M3)
+- **Metal Graphics Rendering**: Modern Metal framework for optimal performance
 - **Retina Display Support**: Proper high-DPI rendering
+- **Resizable Window**: Dynamic window sizing with aspect ratio preservation
+- **Background Execution**: Continues running when app is in background
 - **Classic Mac Emulation**: Emulates Macintosh Plus with 68000 processor
 
 ## Quick Start
@@ -38,6 +41,32 @@ The application will be created at `minivmac.app`.
 
 ## Changelog
 
+### 2025-11-05
+- **Metal Graphics Rendering Migration** 🎨
+  - Complete migration from deprecated OpenGL to Apple's Metal framework
+  - Implemented Metal vertex and fragment shaders for rendering
+  - Added aspect ratio preservation with automatic letterboxing/pillarboxing
+  - Dynamic filtering: pixel-perfect (nearest neighbor) at native resolution, smooth scaling (linear) when resized
+  - Removed all OpenGL dependencies and code
+  - Result: Modern, future-proof rendering with better performance and compatibility
+
+- **Window Management Improvements** 🪟
+  - **Resizable Window**: Window can now be resized by dragging edges/corners
+  - **Fullscreen Alignment**: Fixed pixel plane centering in fullscreen mode
+  - **Screen Stretching**: Pixel plane now stretches to fit window size while maintaining aspect ratio
+  - Proper viewport sizing for accurate rendering at any window size
+
+- **Background Execution** 🎵
+  - Emulator continues running when app loses focus (goes to background)
+  - Audio playback continues in background
+  - Configurable via `WantInitRunInBackground` setting
+  - Result: Can listen to music or run processes while using other apps
+
+- **Bug Fixes** 🐛
+  - Fixed drag and drop registration (restored to original window-based registration)
+  - Fixed Metal layer initialization after window recreation
+  - Improved screen change notification handling for fullscreen transitions
+
 ### 2024-11-04
 - **Fixed audio output issues** ([#2](https://github.com/hongjuny/Mini_vMac_ARM/commit/XXXXXX))
   - Updated deprecated Component Manager API to modern AudioComponent API
@@ -61,20 +90,27 @@ The application will be created at `minivmac.app`.
 
 ## Known Issues
 
-- OpenGL deprecation warnings (functional but will need Metal port in future)
+- None currently known
 
 ## Technical Notes
 
+### Metal Rendering
+The emulator now uses Apple's Metal framework for all graphics rendering:
+- Metal shaders handle aspect ratio preservation automatically
+- Dynamic filtering based on window size (pixel-perfect vs smooth scaling)
+- Proper viewport management for accurate rendering at any resolution
+- Optimized for Apple Silicon GPUs
+
 ### Retina Display Support
-The main challenge was that NSView returns logical coordinates while OpenGL needs physical pixel coordinates. The fix involves:
-1. Getting the backing scale factor from the window
-2. Applying this scale to both the viewport setup and pixel drawing operations
-3. Ensuring coordinate transformations are consistent throughout the rendering pipeline
+High-DPI displays are fully supported through Metal's native backing scale handling:
+1. Metal layer automatically adjusts `contentsScale` based on window's `backingScaleFactor`
+2. Viewport and drawable sizes are calculated correctly for Retina displays
+3. Texture coordinates are properly mapped to physical pixels
 
 ### Build Configuration
 - Target: `mc64` (macOS 64-bit)
 - Compiler: Xcode Command Line Tools GCC/Clang
-- Frameworks: AppKit, AudioUnit, OpenGL
+- Frameworks: AppKit, AudioUnit, Metal, QuartzCore
 
 ## Contributing
 

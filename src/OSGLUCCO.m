@@ -3252,30 +3252,52 @@ label_exit:
 	return v;
 }
 
-/* Load Metal shaders from source file */
+/* Load Metal shaders - try precompiled library first, fallback to source */
 LOCALFUNC blnr LoadMetalShaders(void)
 {
 	blnr v = falseblnr;
 	NSError *error = nil;
 	
-	/* Get path to shader source file */
+	/* Try to load precompiled Metal library from bundle */
 	NSBundle *bundle = [NSBundle mainBundle];
+	NSURL *libraryURL = [bundle URLForResource:@"default" withExtension:@"metallib"];
+	
+	if (nil != libraryURL) {
+		/* Load precompiled library */
+		fprintf(stderr, "Loading precompiled Metal shaders...\n");
+		MyMetalLibrary = [MyMetalDevice newLibraryWithURL:libraryURL error:&error];
+		if (nil != MyMetalLibrary) {
+			fprintf(stderr, "Metal shaders loaded successfully (precompiled)\n");
+			v = trueblnr;
+			goto label_exit;
+		}
+#if dbglog_HAVE
+		if (nil != error) {
+			dbglog_writeln([[error localizedDescription] UTF8String]);
+		}
+#endif
+		fprintf(stderr, "Warning: Could not load precompiled library, trying source...\n");
+	}
+	
+	/* Fallback: compile from source file */
 	NSString *shaderPath = [bundle pathForResource:@"shaders" ofType:@"metal"];
 	
 	if (nil == shaderPath) {
 		/* Try in src directory (for development) */
 		NSString *srcPath = [[NSString stringWithUTF8String:__FILE__] stringByDeletingLastPathComponent];
 		shaderPath = [srcPath stringByAppendingPathComponent:@"shaders.metal"];
-		
-		if (! [[NSFileManager defaultManager] fileExistsAtPath:shaderPath]) {
+	}
+	
+	if (nil == shaderPath || ! [[NSFileManager defaultManager] fileExistsAtPath:shaderPath]) {
 #if dbglog_HAVE
-			dbglog_writeln("Could not find shaders.metal file");
+		dbglog_writeln("Could not find shaders.metal file");
 #endif
-			goto label_exit;
-		}
+		fprintf(stderr, "ERROR: Could not find default.metallib or shaders.metal\n");
+		goto label_exit;
 	}
 	
 	/* Read shader source */
+	fprintf(stderr, "Compiling Metal shaders from source...\n");
 	NSString *shaderSource = [NSString stringWithContentsOfFile:shaderPath
 	                                                    encoding:NSUTF8StringEncoding
 	                                                       error:&error];
@@ -3288,8 +3310,7 @@ LOCALFUNC blnr LoadMetalShaders(void)
 		goto label_exit;
 	}
 	
-	/* Compile shaders */
-	fprintf(stderr, "Compiling Metal shaders...\n");
+	/* Compile shaders at runtime */
 	MyMetalLibrary = [MyMetalDevice newLibraryWithSource:shaderSource
 	                                              options:nil
 	                                                error:&error];
@@ -3307,7 +3328,7 @@ LOCALFUNC blnr LoadMetalShaders(void)
 		}
 		goto label_exit;
 	}
-	fprintf(stderr, "Metal shaders compiled successfully\n");
+	fprintf(stderr, "Metal shaders compiled successfully (from source)\n");
 	
 	v = trueblnr;
 

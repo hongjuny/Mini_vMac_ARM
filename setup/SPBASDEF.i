@@ -31,4 +31,4 @@
 #define Have_SPCNFGGL 1
 #define Have_SPCNFGAP 1
 
-#define UseOpenGLinOSX 1
+#define UseOpenGLinOSX 0

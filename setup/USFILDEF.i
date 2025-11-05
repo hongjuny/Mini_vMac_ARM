@@ -326,6 +326,9 @@ static void DoAllFrameWorks(tWriteOneFrameWorkType p)
 		p("AudioUnit");
 #if UseOpenGLinOSX
 		p("OpenGL");
+#else
+		p("Metal");
+		p("QuartzCore");
 #endif
 	} else {
 		p("Carbon");
@@ -415,6 +418,14 @@ LOCALPROC Write_tmachoShell(void)
 	DoAllDocTypesWithSetup(WriteDocTypeCopyMachoFile);
 	WriteCopyFile(WriteInfoPlistFilePath,
 		Write_tmachocontents_d_ToDestFile);
+#if !UseOpenGLinOSX
+	/* Copy Metal shader source to bundle (will compile at runtime if needed) */
+	WriteBgnDestFileLn();
+	WriteCStrToDestFile("cp \"src/shaders.metal\" \"");
+	Write_tmachores_d_ToDestFile();
+	WriteCStrToDestFile("/shaders.metal\" 2>/dev/null || true");
+	WriteEndDestFileLn();
+#endif
 	WriteEchoToNewFile(Write_tmachoLangDummyContents,
 		Write_tmachoLangDummyPath, trueblnr);
 	WriteEchoToNewFile(Write_tmachoPkgInfoContents,

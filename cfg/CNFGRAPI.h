@@ -10,7 +10,6 @@
 #import <Cocoa/Cocoa.h>
 #include <CoreAudio/CoreAudio.h>
 #include <AudioUnit/AudioUnit.h>
-#include <OpenGL/gl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,7 +61,7 @@
 #define WantInitMagnify 0
 #define EnableMagnify 1
 #define MyWindowScale 2
-#define WantInitRunInBackground 1  /* Enable background execution */
+#define WantInitRunInBackground 0
 #define WantInitNotAutoSlow 0
 #define WantInitSpeedValue 3
 #define WantEnblCtrlInt 1

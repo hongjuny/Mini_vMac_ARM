@@ -3562,6 +3562,50 @@ LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
 	if (nil != MyMetalTexture) {
 		[renderEncoder setFragmentTexture:MyMetalTexture atIndex:0];
 	}
+	
+	/* Set vertex buffer for viewport and texture sizes (for aspect ratio preservation) */
+	NSRect viewBounds = [MyNSview bounds];
+	CGFloat scaleFactor = 1.0;
+	NSWindow *window = [MyNSview window];
+	if (nil != window) {
+		scaleFactor = [window backingScaleFactor];
+	}
+	
+	float viewportSize[2] = {
+		(float)(viewBounds.size.width * scaleFactor),
+		(float)(viewBounds.size.height * scaleFactor)
+	};
+	float textureSize[2] = {
+		(float)vMacScreenWidth,
+		(float)vMacScreenHeight
+	};
+	
+	/* Use linear filtering for smooth scaling when window is resized */
+	/* Use nearest neighbor for pixel-perfect when window matches native size */
+	BOOL useSmoothFiltering = (viewBounds.size.width != vMacScreenWidth || 
+	                           viewBounds.size.height != vMacScreenHeight);
+	
+	/* Set vertex buffers */
+	id<MTLBuffer> viewportBuffer = [MyMetalDevice newBufferWithBytes:viewportSize
+	                                                           length:sizeof(viewportSize)
+	                                                          options:MTLResourceStorageModeShared];
+	id<MTLBuffer> textureBuffer = [MyMetalDevice newBufferWithBytes:textureSize
+	                                                          length:sizeof(textureSize)
+	                                                         options:MTLResourceStorageModeShared];
+	
+	if (nil != viewportBuffer && nil != textureBuffer) {
+		[renderEncoder setVertexBuffer:viewportBuffer offset:0 atIndex:0];
+		[renderEncoder setVertexBuffer:textureBuffer offset:0 atIndex:1];
+		
+		/* Set fragment buffer for filtering mode */
+		BOOL smoothFilter = useSmoothFiltering;
+		id<MTLBuffer> filterBuffer = [MyMetalDevice newBufferWithBytes:&smoothFilter
+		                                                         length:sizeof(BOOL)
+		                                                        options:MTLResourceStorageModeShared];
+		if (nil != filterBuffer) {
+			[renderEncoder setFragmentBuffer:filterBuffer offset:0 atIndex:0];
+		}
+	}
 
 	/* Draw full-screen quad (4 vertices = 2 triangles) */
 	[renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
@@ -3762,6 +3806,26 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 - (void)windowDidResignKey:(NSNotification *)aNotification
 {
 	gTrueBackgroundFlag = trueblnr;
+}
+
+- (void)windowDidResize:(NSNotification *)aNotification
+{
+	/* Update Metal layer size when window is resized */
+#if USE_METAL
+	if (nil != MyMetalLayer && nil != MyNSview) {
+		NSWindow *window = [MyNSview window];
+		if (nil != window) {
+			CGFloat scaleFactor = [window backingScaleFactor];
+			NSRect frame = [MyNSview frame];
+			MyMetalLayer.drawableSize = CGSizeMake(
+				frame.size.width * scaleFactor,
+				frame.size.height * scaleFactor
+			);
+			/* Trigger redraw */
+			ScreenChangedAll();
+		}
+	}
+#endif
 }
 
 @end
@@ -4381,6 +4445,9 @@ LOCALPROC LeaveBackground(void)
 	ReconnectKeyCodes3();
 	DisableKeyRepeat();
 	EmulationWasInterrupted = trueblnr;
+	
+	/* Don't need to restart - it was already running */
+	/* CurSpeedStopped = falseblnr;  // Removed - allow background execution */
 }
 
 LOCALPROC EnterBackground(void)
@@ -4389,6 +4456,9 @@ LOCALPROC EnterBackground(void)
 	DisconnectKeyCodes3();
 
 	ForceShowCursor();
+	
+	/* Don't stop emulation in background - keep it running */
+	/* CurSpeedStopped = trueblnr;  // Removed - allow background execution */
 }
 
 LOCALPROC LeaveSpeedStopped(void)
@@ -4630,13 +4700,9 @@ LOCALPROC CheckForSavedTasks(void)
 #endif
 	}
 
-	if (CurSpeedStopped != (SpeedStopped ||
-		(gBackgroundFlag && ! RunInBackground
-#if EnableAutoSlow && 0
-			&& (QuietSubTicks >= 4092)
-#endif
-		)))
-	{
+	/* Allow background execution - don't stop emulation when window loses focus */
+	/* Only stop if explicitly requested (SpeedStopped) */
+	if (CurSpeedStopped != SpeedStopped) {
 		CurSpeedStopped = ! CurSpeedStopped;
 		if (CurSpeedStopped) {
 			EnterSpeedStopped();
@@ -4927,9 +4993,12 @@ label_retry:
 		goto label_exit;
 	}
 
+	/* Allow background execution - don't block on event loop when stopped */
+	/* Only stop drawing when explicitly stopped, but still process events */
 	if (CurSpeedStopped) {
 		DoneWithDrawingForTick();
-		TheUntil = TheDistantFuture;
+		/* Don't wait forever - allow background processing */
+		TheUntil = TheDistantPast;  /* Changed from TheDistantFuture to allow processing */
 		goto label_retry;
 	}
 

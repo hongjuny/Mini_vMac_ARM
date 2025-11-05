@@ -19,8 +19,10 @@ struct VertexOut {
 	float2 texCoord [[user(locn0)]];
 };
 
-/* Vertex shader: Renders a full-screen quad */
-vertex VertexOut vertex_main(uint vertexID [[vertex_id]])
+/* Vertex shader: Renders a full-screen quad with aspect ratio preservation */
+vertex VertexOut vertex_main(uint vertexID [[vertex_id]],
+                             constant float2 &viewportSize [[buffer(0)]],
+                             constant float2 &textureSize [[buffer(1)]])
 {
 	/* Full-screen quad positions (in clip space: -1 to 1) */
 	float2 positions[4] = {
@@ -29,6 +31,22 @@ vertex VertexOut vertex_main(uint vertexID [[vertex_id]])
 		float2(-1.0, -1.0),  // bottom-left
 		float2( 1.0, -1.0)   // bottom-right
 	};
+	
+	/* Calculate aspect ratios */
+	float viewportAspect = viewportSize.x / viewportSize.y;
+	float textureAspect = textureSize.x / textureSize.y;
+	
+	/* Scale positions to maintain aspect ratio */
+	float2 scaledPos;
+	if (viewportAspect > textureAspect) {
+		/* Viewport is wider - letterbox (black bars on sides) */
+		float scale = textureAspect / viewportAspect;
+		scaledPos = float2(positions[vertexID].x * scale, positions[vertexID].y);
+	} else {
+		/* Viewport is taller - pillarbox (black bars on top/bottom) */
+		float scale = viewportAspect / textureAspect;
+		scaledPos = float2(positions[vertexID].x, positions[vertexID].y * scale);
+	}
 	
 	/* Texture coordinates (0 to 1) */
 	float2 texCoords[4] = {
@@ -39,40 +57,49 @@ vertex VertexOut vertex_main(uint vertexID [[vertex_id]])
 	};
 	
 	VertexOut out;
-	out.position = float4(positions[vertexID], 0.0, 1.0);
+	out.position = float4(scaledPos, 0.0, 1.0);
 	out.texCoord = texCoords[vertexID];
 	
 	return out;
 }
 
-/* Fragment shader: Samples texture and outputs color */
+/* Fragment shader: Samples texture with configurable filtering */
 fragment float4 fragment_main(VertexOut in [[stage_in]],
-                              texture2d<float> texture [[texture(0)]])
+                              texture2d<float> texture [[texture(0)]],
+                              constant bool &useSmoothFiltering [[buffer(0)]])
 {
-	/* Nearest neighbor sampling for pixel-perfect rendering */
-	constexpr sampler textureSampler(mag_filter::nearest,
-	                                 min_filter::nearest,
-	                                 address::clamp_to_edge);
-	
-	/* Sample the texture */
-	float4 color = texture.sample(textureSampler, in.texCoord);
-	
-	/* If grayscale (R channel only), convert to RGB */
-	/* For RGBA textures, color already contains all channels */
-	return color;
+	/* Use linear filtering for smooth scaling, nearest for pixel-perfect */
+	if (useSmoothFiltering) {
+		constexpr sampler textureSampler(mag_filter::linear,
+		                                 min_filter::linear,
+		                                 address::clamp_to_edge);
+		return texture.sample(textureSampler, in.texCoord);
+	} else {
+		constexpr sampler textureSampler(mag_filter::nearest,
+		                                 min_filter::nearest,
+		                                 address::clamp_to_edge);
+		return texture.sample(textureSampler, in.texCoord);
+	}
 }
 
 /* Fragment shader for grayscale (R8) textures */
 fragment float4 fragment_main_grayscale(VertexOut in [[stage_in]],
-                                       texture2d<float> texture [[texture(0)]])
+                                       texture2d<float> texture [[texture(0)]],
+                                       constant bool &useSmoothFiltering [[buffer(0)]])
 {
-	/* Nearest neighbor sampling for pixel-perfect rendering */
-	constexpr sampler textureSampler(mag_filter::nearest,
-	                                 min_filter::nearest,
-	                                 address::clamp_to_edge);
-	
-	/* Sample the texture (grayscale in R channel) */
-	float gray = texture.sample(textureSampler, in.texCoord).r;
+	/* Use linear filtering for smooth scaling, nearest for pixel-perfect */
+	float gray;
+	if (useSmoothFiltering) {
+		constexpr sampler textureSampler(mag_filter::linear,
+		                                 min_filter::linear,
+		                                 address::clamp_to_edge);
+		gray = texture.sample(textureSampler, in.texCoord).r;
+	} else {
+		constexpr sampler textureSampler(mag_filter::nearest,
+		                                 min_filter::nearest,
+		                                 address::clamp_to_edge);
+		gray = texture.sample(textureSampler, in.texCoord).r;
+	}
 	
 	/* Convert to RGB (white = 1.0, black = 0.0) */
 	return float4(gray, gray, gray, 1.0);

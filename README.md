@@ -63,7 +63,6 @@ The application will be created at `minivmac.app`.
   - Result: Can listen to music or run processes while using other apps
 
 - **Bug Fixes**
-  - Fixed drag and drop registration (restored to original window-based registration)
   - Fixed Metal layer initialization after window recreation
   - Improved screen change notification handling for fullscreen transitions
 

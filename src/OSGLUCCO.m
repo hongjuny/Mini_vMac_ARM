@@ -3798,10 +3798,29 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 			[sender draggingSourceOperationMask];
 	*/
 
-	/* Try NSPasteboardTypeURL first (modern API) */
-	if ([[pboard types] containsObject: NSPasteboardTypeURL]) {
+	/* Try modern API: readObjectsForClasses for multiple files */
+	if ([[pboard types] containsObject: (NSString *)kUTTypeFileURL]) {
+		NSArray *fileURLs = [pboard readObjectsForClasses:[NSArray arrayWithObject:[NSURL class]] options:nil];
+		if (nil != fileURLs && [fileURLs count] > 0) {
+			int i;
+			int n = [fileURLs count];
+			for (i = 0; i < n; ++i) {
+				NSURL *fileURL = [fileURLs objectAtIndex:i];
+				if (nil != fileURL && [fileURL isFileURL]) {
+					NSString* filePath = [fileURL path];
+					if (nil != filePath) {
+						Sony_ResolveInsert(filePath);
+						v = YES;
+					}
+				}
+			}
+		}
+	}
+	
+	/* Fallback: Try single URL from pasteboard */
+	if (!v && [[pboard types] containsObject: NSPasteboardTypeURL]) {
 		NSURL *fileURL = [NSURL URLFromPasteboard: pboard];
-		if (nil != fileURL) {
+		if (nil != fileURL && [fileURL isFileURL]) {
 			NSString* filePath = [fileURL path];
 			if (nil != filePath) {
 				Sony_ResolveInsert(filePath);
@@ -3810,13 +3829,13 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 		}
 	}
 	
-	/* Fallback to UTTypeFileURL (for older systems) */
+	/* Fallback to deprecated NSFilenamesPboardType (for compatibility) */
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-	if (!v && [[pboard types] containsObject:(NSString *)kUTTypeFileURL]) {
+	if (!v && [[pboard types] containsObject:NSFilenamesPboardType]) {
 		int i;
 		NSArray *file_names =
-			[pboard propertyListForType: (NSString *)kUTTypeFileURL];
+			[pboard propertyListForType: NSFilenamesPboardType];
 #pragma clang diagnostic pop
 		if (nil != file_names) {
 			int n = [file_names count];
@@ -4180,11 +4199,12 @@ LOCALFUNC blnr CreateMainWindow(void)
 	/* Register for drag and drop (disk images) - before setting content view */
 	[MyWindow registerForDraggedTypes:
 		[NSArray arrayWithObjects:
-			NSPasteboardTypeURL,
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 			(NSString *)kUTTypeFileURL,
+			NSFilenamesPboardType,
 #pragma clang diagnostic pop
+			NSPasteboardTypeURL,
 			nil]];
 #endif
 

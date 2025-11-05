@@ -1,14 +1,34 @@
-# ROM files
+# Build artifacts
+*.o
+*.a
+*.dylib
+*.so
+*.dSYM
+bld/
+minivmac.app/
+AppTemp/
+
+# Setup/build generated files
+setup_tool
+setup.sh
+
+# Disk images
+*.dsk
+*.img
+*.iso
+
+# ROM files (user must provide their own)
 *.ROM
-*.rom
 vMac.ROM
 
-# macOS
+# IDE files
 .DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
 
-# Build artifacts
-bld/*.o
-setup_tool
-
-# Application bundle (optional - comment out if you want to include it)
-# minivmac.app/
+# Backup files
+*.bak
+*.backup

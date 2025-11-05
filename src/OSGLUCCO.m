@@ -608,11 +608,12 @@ LOCALFUNC NSString *MyResolveAlias(NSString *filePath,
 			FSRef fsRef;
 			Boolean wasAliased;
 
+			/* Note: CFURLGetFSRef, FSResolveAliasFile, and CFURLCreateFromFSRef are deprecated,
+			   but they are still functional and are used here for alias resolution.
+			   A modern replacement would require more complex NSURL-based code. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 			if (CFURLGetFSRef(url, &fsRef)) {
-				/*
-					FSResolveAliasFile deprecated in 10.8
-				*/
-
 				if ((FSResolveAliasFile(&fsRef,
 					TRUE /*resolveAliasChains*/,
 					targetIsFolder, &wasAliased) == noErr)
@@ -621,6 +622,7 @@ LOCALFUNC NSString *MyResolveAlias(NSString *filePath,
 					CFURLRef resolvedurl =
 						CFURLCreateFromFSRef(kCFAllocatorDefault,
 							&fsRef);
+#pragma clang diagnostic pop
 					if (resolvedurl != NULL) {
 						resolvedPath =
 							(NSString *)CFURLCopyFileSystemPath(
@@ -1217,10 +1219,10 @@ GLOBALOSGLUFUNC tMacErr HTCEexport(tPbuf i)
 			autorelease];
 		NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
 		NSArray *newTypes =
-			[NSArray arrayWithObject: NSStringPboardType];
+			[NSArray arrayWithObject: NSPasteboardTypeString];
 
 		(void) [pasteboard declareTypes: newTypes owner: nil];
-		if ([pasteboard setString: ss forType: NSStringPboardType]) {
+				if ([pasteboard setString: ss forType: NSPasteboardTypeString]) {
 			err = mnvm_noErr;
 		}
 
@@ -1240,13 +1242,13 @@ GLOBALOSGLUFUNC tMacErr HTCEimport(tPbuf *r)
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 	NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
 	NSArray *supportedTypes = [NSArray
-		arrayWithObject: NSStringPboardType];
+		arrayWithObject: NSPasteboardTypeString];
 	NSString *available = [pasteboard
 		availableTypeFromArray: supportedTypes];
 
 	if (nil != available) {
 		NSString *string = [pasteboard
-			stringForType: NSStringPboardType];
+						stringForType: NSPasteboardTypeString];
 		if (nil != string) {
 			err = NSStringToRomanPbuf(string, r);
 		}
@@ -1329,7 +1331,7 @@ LOCALFUNC CGPoint QZ_PrivateSDLToCG(NSPoint *p)
 
 	*p = [MyNSview convertPoint: *p toView: nil];
 	p->y = [MyNSview frame].size.height - p->y;
-	*p = [MyWindow convertBaseToScreen: *p];
+	*p = [MyWindow convertPointToScreen: *p];
 
 	cgp.x = p->x;
 	cgp.y = CGDisplayPixelsHigh(kCGDirectMainDisplay)
@@ -1345,7 +1347,7 @@ LOCALPROC QZ_GetMouseLocation(NSPoint *p)
 
 	*p = [NSEvent mouseLocation]; /* global coordinates */
 	if (nil != MyWindow) {
-		*p = [MyWindow convertScreenToBase: *p];
+		*p = [MyWindow convertPointFromScreen: *p];
 	}
 	*p = [MyNSview convertPoint: *p fromView: nil];
 	p->y = [MyNSview frame].size.height - p->y;
@@ -1380,15 +1382,15 @@ LOCALPROC MyUpdateKeyboardModifiers(NSUInteger newMods)
 	NSUInteger changeMask = MyCurrentMods ^ newMods;
 
 	if (0 != changeMask) {
-		if (0 != (changeMask & NSAlphaShiftKeyMask)) {
+		if (0 != (changeMask & NSEventModifierFlagCapsLock)) {
 			Keyboard_UpdateKeyMap2(MKC_formac_CapsLock,
-				0 != (newMods & NSAlphaShiftKeyMask));
+				0 != (newMods & NSEventModifierFlagCapsLock));
 		}
 
 #if MKC_formac_RShift == MKC_formac_Shift
-		if (0 != (changeMask & NSShiftKeyMask)) {
+		if (0 != (changeMask & NSEventModifierFlagShift)) {
 			Keyboard_UpdateKeyMap2(MKC_formac_Shift,
-				0 != (newMods & NSShiftKeyMask));
+				0 != (newMods & NSEventModifierFlagShift));
 		}
 #else
 		if (0 != (changeMask & My_NSLShiftKeyMask)) {
@@ -1402,9 +1404,9 @@ LOCALPROC MyUpdateKeyboardModifiers(NSUInteger newMods)
 #endif
 
 #if MKC_formac_RControl == MKC_formac_Control
-		if (0 != (changeMask & NSControlKeyMask)) {
+		if (0 != (changeMask & NSEventModifierFlagControl)) {
 			Keyboard_UpdateKeyMap2(MKC_formac_Control,
-				0 != (newMods & NSControlKeyMask));
+				0 != (newMods & NSEventModifierFlagControl));
 		}
 #else
 		if (0 != (changeMask & My_NSLControlKeyMask)) {
@@ -1418,9 +1420,9 @@ LOCALPROC MyUpdateKeyboardModifiers(NSUInteger newMods)
 #endif
 
 #if MKC_formac_RCommand == MKC_formac_Command
-		if (0 != (changeMask & NSCommandKeyMask)) {
+		if (0 != (changeMask & NSEventModifierFlagCommand)) {
 			Keyboard_UpdateKeyMap2(MKC_formac_Command,
-				0 != (newMods & NSCommandKeyMask));
+				0 != (newMods & NSEventModifierFlagCommand));
 		}
 #else
 		if (0 != (changeMask & My_NSLCommandKeyMask)) {
@@ -1434,9 +1436,9 @@ LOCALPROC MyUpdateKeyboardModifiers(NSUInteger newMods)
 #endif
 
 #if MKC_formac_ROption == MKC_formac_Option
-		if (0 != (changeMask & NSAlternateKeyMask)) {
+		if (0 != (changeMask & NSEventModifierFlagOption)) {
 			Keyboard_UpdateKeyMap2(MKC_formac_Option,
-				0 != (newMods & NSAlternateKeyMask));
+				0 != (newMods & NSEventModifierFlagOption));
 		}
 #else
 		if (0 != (changeMask & My_NSLOptionKeyMask)) {
@@ -2641,7 +2643,7 @@ LOCALFUNC NSMenu *setApplicationMenu(NSMenu *mainMenu)
 	menuItem = [appleMenu addItemWithTitle: sAbout
 		action: @selector(performApplicationAbout:)
 		keyEquivalent: @"a"];
-	[menuItem setKeyEquivalentModifierMask: NSControlKeyMask];
+		[menuItem setKeyEquivalentModifierMask: NSEventModifierFlagControl];
 
 	[appleMenu addItem:[NSMenuItem separatorItem]];
 
@@ -2661,7 +2663,7 @@ LOCALFUNC NSMenu *setApplicationMenu(NSMenu *mainMenu)
 
 	menuItem = [appleMenu addItemWithTitle: sQuit
 		action: @selector(terminate:) keyEquivalent: @"q"];
-	[menuItem setKeyEquivalentModifierMask: NSControlKeyMask];
+		[menuItem setKeyEquivalentModifierMask: NSEventModifierFlagControl];
 
 	FinishSubMenu(appleMenu, mainMenu, sAppName);
 
@@ -2686,7 +2688,7 @@ LOCALPROC setupFileMenu(NSMenu *mainMenu)
 		addItemWithTitle: sOpen
 		action: @selector(performFileOpen:)
 		keyEquivalent: @"o"];
-	[menuItem setKeyEquivalentModifierMask: NSControlKeyMask];
+		[menuItem setKeyEquivalentModifierMask: NSEventModifierFlagControl];
 
 	FinishSubMenu(fileMenu, mainMenu, sFile);
 
@@ -2748,14 +2750,11 @@ LOCALPROC MyMenuSetup(void)
 LOCALPROC HaveChangedScreenBuff(ui4r top, ui4r left,
 	ui4r bottom, ui4r right)
 {
-	if ([MyNSview lockFocusIfCanDraw]) {
 #if USE_METAL
-		MyDrawWithMetal(top, left, bottom, right);
+	MyDrawWithMetal(top, left, bottom, right);
 #else
-		MyDrawWithOpenGL(top, left, bottom, right);
+	/* Metal rendering is always used when USE_METAL is defined */
 #endif
-		[MyNSview unlockFocus];
-	}
 }
 #else
 LOCALPROC HaveChangedScreenBuff(ui4r top, ui4r left,
@@ -2936,8 +2935,12 @@ LOCALPROC CheckSavedMacMsg(void)
 		NSString *quitMsg0 =
 			NSStringCreateFromSubstCStr(kStrCmdQuit);
 
-		(void) NSRunAlertPanel(briefMsg0, @"%@", quitMsg0, nil, nil,
-			longMsg0);
+		NSAlert *alert = [[NSAlert alloc] init];
+		[alert setMessageText: briefMsg0];
+		[alert setInformativeText: longMsg0];
+		[alert addButtonWithTitle: quitMsg0];
+		(void) [alert runModal];
+		[alert release];
 
 		SavedBriefMsg = nullpr;
 	}
@@ -3039,7 +3042,7 @@ LOCALPROC InsertADisk0(void)
 
 	MyBeginDialog();
 
-	if (NSOKButton == [panel runModal]) {
+	if (NSModalResponseOK == [panel runModal]) {
 		int i;
 		NSArray *a = [panel URLs];
 		int n = [a count];
@@ -3437,6 +3440,8 @@ LOCALPROC MyUpdateMetalContext(void)
 	}
 }
 
+/* Unused function - kept for potential future use */
+#if 0
 LOCALPROC MyAdjustMetalForSize(int h, int v)
 {
 	if (nil != MyMetalLayer && nil != MyNSview) {
@@ -3449,10 +3454,11 @@ LOCALPROC MyAdjustMetalForSize(int h, int v)
 		}
 	}
 }
+#endif
 
 /* Performance profiling (optional) */
-#if 0  /* Set to 1 to enable performance profiling */
-#define METAL_PROFILE 1
+#ifndef METAL_PROFILE
+#define METAL_PROFILE 0  /* Set to 1 to enable performance profiling */
 #endif
 
 #if METAL_PROFILE
@@ -3792,8 +3798,8 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 			[sender draggingSourceOperationMask];
 	*/
 
-	/* Try NSURLPboardType first (modern API) */
-	if ([[pboard types] containsObject: NSURLPboardType]) {
+	/* Try NSPasteboardTypeURL first (modern API) */
+	if ([[pboard types] containsObject: NSPasteboardTypeURL]) {
 		NSURL *fileURL = [NSURL URLFromPasteboard: pboard];
 		if (nil != fileURL) {
 			NSString* filePath = [fileURL path];
@@ -3804,11 +3810,14 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 		}
 	}
 	
-	/* Fallback to NSFilenamesPboardType (deprecated but still works) */
-	if (!v && [[pboard types] containsObject:NSFilenamesPboardType]) {
+	/* Fallback to UTTypeFileURL (for older systems) */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+	if (!v && [[pboard types] containsObject:(NSString *)kUTTypeFileURL]) {
 		int i;
 		NSArray *file_names =
-			[pboard propertyListForType: NSFilenamesPboardType];
+			[pboard propertyListForType: (NSString *)kUTTypeFileURL];
+#pragma clang diagnostic pop
 		if (nil != file_names) {
 			int n = [file_names count];
 
@@ -4103,7 +4112,7 @@ LOCALFUNC blnr CreateMainWindow(void)
 			+ ((NewWindowHeight < MainScrnBounds.size.height)
 				? NewWindowHeight : MainScrnBounds.size.height));
 
-		style = NSBorderlessWindowMask;
+		style = NSWindowStyleMaskBorderless;
 	}
 #endif
 #if VarFullScreen
@@ -4136,9 +4145,9 @@ LOCALFUNC blnr CreateMainWindow(void)
 
 		/* OpenGL offsets removed - Metal doesn't need them */
 
-		style = NSTitledWindowMask
-			| NSMiniaturizableWindowMask | NSClosableWindowMask
-			| NSResizableWindowMask;
+				style = NSWindowStyleMaskTitled
+						| NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskClosable
+						| NSWindowStyleMaskResizable;
 
 		CurWinIndx = WinIndx;
 	}
@@ -4171,7 +4180,12 @@ LOCALFUNC blnr CreateMainWindow(void)
 	/* Register for drag and drop (disk images) - before setting content view */
 	[MyWindow registerForDraggedTypes:
 		[NSArray arrayWithObjects:
-			NSURLPboardType, NSFilenamesPboardType, nil]];
+			NSPasteboardTypeURL,
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+			(NSString *)kUTTypeFileURL,
+#pragma clang diagnostic pop
+			nil]];
 #endif
 
 	MyWinDelegate = [[MyClassWindowDelegate alloc] init];
@@ -4622,7 +4636,7 @@ createDirectoryAtPath:withIntermediateDirectories:attributes:error:
 LOCALPROC MakeNewDisk(ui5b L, NSString *drivename)
 {
 #if SaveDialogEnable
-	NSInteger result = NSCancelButton;
+	NSInteger result = NSModalResponseCancel;
 	NSSavePanel *panel = [NSSavePanel savePanel];
 
 	MyBeginDialog();
@@ -4675,7 +4689,7 @@ LOCALPROC MakeNewDisk(ui5b L, NSString *drivename)
 
 	MyEndDialog();
 
-	if (NSOKButton == result) {
+	if (NSModalResponseOK == result) {
 		NSString* filePath = [[panel URL] path];
 		MakeNewDisk0(L, filePath);
 	}
@@ -4929,9 +4943,9 @@ LOCALPROC ProcessEventLocation(NSEvent *event)
 
 	if (w != MyWindow) {
 		if (nil != w) {
-			p = [w convertBaseToScreen: p];
+			p = [w convertPointToScreen: p];
 		}
-		p = [MyWindow convertScreenToBase: p];
+		p = [MyWindow convertPointFromScreen: p];
 	}
 	p = [MyNSview convertPoint: p fromView: nil];
 	p.y = [MyNSview frame].size.height - p.y;
@@ -4949,9 +4963,9 @@ LOCALPROC ProcessKeyEvent(blnr down, NSEvent *event)
 LOCALPROC ProcessOneSystemEvent(NSEvent *event)
 {
 	switch ([event type]) {
-		case NSLeftMouseDown:
-		case NSRightMouseDown:
-		case NSOtherMouseDown:
+		case NSEventTypeLeftMouseDown:
+		case NSEventTypeRightMouseDown:
+		case NSEventTypeOtherMouseDown:
 			/*
 				int button = QZ_OtherMouseButtonToSDL(
 					[event buttonNumber]);
@@ -4976,9 +4990,9 @@ LOCALPROC ProcessOneSystemEvent(NSEvent *event)
 			}
 			break;
 
-		case NSLeftMouseUp:
-		case NSRightMouseUp:
-		case NSOtherMouseUp:
+		case NSEventTypeLeftMouseUp:
+		case NSEventTypeRightMouseUp:
+		case NSEventTypeOtherMouseUp:
 			/*
 				int button = QZ_OtherMouseButtonToSDL(
 					[event buttonNumber]);
@@ -4993,15 +5007,15 @@ LOCALPROC ProcessOneSystemEvent(NSEvent *event)
 			}
 			break;
 
-		case NSMouseMoved:
+		case NSEventTypeMouseMoved:
 			{
 				ProcessEventLocation(event);
 				ProcessEventModifiers(event);
 			}
 			break;
-		case NSLeftMouseDragged:
-		case NSRightMouseDragged:
-		case NSOtherMouseDragged:
+		case NSEventTypeLeftMouseDragged:
+		case NSEventTypeRightMouseDragged:
+		case NSEventTypeOtherMouseDragged:
 			if (! MyMouseButtonState) {
 				/* doesn't belong to us ? */
 				[NSApp sendEvent: event];
@@ -5010,13 +5024,13 @@ LOCALPROC ProcessOneSystemEvent(NSEvent *event)
 				ProcessEventModifiers(event);
 			}
 			break;
-		case NSKeyUp:
+		case NSEventTypeKeyUp:
 			ProcessKeyEvent(falseblnr, event);
 			break;
-		case NSKeyDown:
+		case NSEventTypeKeyDown:
 			ProcessKeyEvent(trueblnr, event);
 			break;
-		case NSFlagsChanged:
+		case NSEventTypeFlagsChanged:
 			ProcessEventModifiers(event);
 			break;
 		/* case NSScrollWheel: */
@@ -5039,7 +5053,6 @@ GLOBALOSGLUPROC WaitForNextTick(void)
 
 	pool = [[NSAutoreleasePool alloc] init];
 
-	NSDate *TheDistantFuture = [NSDate distantFuture];
 	NSDate *TheDistantPast = [NSDate distantPast];
 #if 0
 	NSDate *TheNextTick = [NSDate
@@ -5052,7 +5065,7 @@ label_retry:
 
 	i = 32;
 	while ((--i >= 0) && (nil != (event =
-		[NSApp nextEventMatchingMask: NSAnyEventMask
+		[NSApp nextEventMatchingMask: NSEventMaskAny
 			untilDate: TheUntil
 			inMode: NSDefaultRunLoopMode
 			dequeue: YES])))
@@ -5262,7 +5275,7 @@ LOCALFUNC blnr setupWorkingDirectory(void)
 			http://www.cocoabuilder.com/ post.)
 		*/
 		NSEvent* event = [NSEvent
-			otherEventWithType: NSApplicationDefined
+			otherEventWithType: NSEventTypeApplicationDefined
 			location: NSMakePoint(0, 0)
 			modifierFlags: 0
 			timestamp: 0.0

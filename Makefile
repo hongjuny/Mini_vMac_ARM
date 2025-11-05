@@ -84,7 +84,7 @@ minivmac.app/Contents/MacOS/minivmac : $(ObjFiles) minivmac.app/Contents/Resourc
 	gcc \
 		$(mk_ArchFlags) -flto -Os \
 		-o "minivmac.app/Contents/MacOS/minivmac" \
-		$(ObjFiles) -framework AppKit -framework AudioUnit -framework OpenGL -framework Metal -framework QuartzCore
+		$(ObjFiles) -framework AppKit -framework AudioUnit -framework Metal -framework QuartzCore
 
 clean :
 	rm -f $(ObjFiles)

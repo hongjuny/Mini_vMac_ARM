@@ -2514,10 +2514,11 @@ LOCALPROC MySound_UnInit(void)
 LOCALFUNC blnr MySound_Init(void)
 {
 	OSStatus result = noErr;
-	AudioComponent comp;
+	AudioComponent comp = NULL;
 	AudioComponentDescription desc;
 	struct AURenderCallbackStruct callback;
 	AudioStreamBasicDescription requestedDesc;
+	blnr cleanupNeeded = falseblnr;
 
 
 	cur_audio.fTheSoundBuffer = TheSoundBuffer;
@@ -2561,31 +2562,48 @@ LOCALFUNC blnr MySound_Init(void)
 	callback.inputProc = audioCallback;
 	callback.inputProcRefCon = &cur_audio;
 
+	/* Step 1: Find audio component */
 	if (NULL == (comp = AudioComponentFindNext(NULL, &desc)))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not find audio output component. "
+			"Audio will be disabled.\n");
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: "
 			"AudioComponentFindNext returned NULL");
 #endif
-	} else
+		goto label_cleanup;
+	}
 
+	/* Step 2: Create audio component instance */
 	if (noErr != (result = AudioComponentInstanceNew(
 		comp, &cur_audio.outputAudioUnit)))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not create audio component instance (error: %d). "
+			"Audio will be disabled.\n", (int)result);
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: AudioComponentInstanceNew");
 #endif
-	} else
+		goto label_cleanup;
+	}
+	cleanupNeeded = trueblnr;
 
+	/* Step 3: Initialize audio unit */
 	if (noErr != (result = AudioUnitInitialize(
 		cur_audio.outputAudioUnit)))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not initialize audio unit (error: %d). "
+			"Audio will be disabled.\n", (int)result);
 #if dbglog_HAVE
 		dbglog_writeln(
 			"Failed to start CoreAudio: AudioUnitInitialize");
 #endif
-	} else
+		goto label_cleanup;
+	}
 
+	/* Step 4: Set stream format */
 	if (noErr != (result = AudioUnitSetProperty(
 		cur_audio.outputAudioUnit,
 		kAudioUnitProperty_StreamFormat,
@@ -2594,12 +2612,17 @@ LOCALFUNC blnr MySound_Init(void)
 		&requestedDesc,
 		sizeof(requestedDesc))))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not set stream format (error: %d). "
+			"Audio will be disabled.\n", (int)result);
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: "
 			"AudioUnitSetProperty(kAudioUnitProperty_StreamFormat)");
 #endif
-	} else
+		goto label_cleanup;
+	}
 
+	/* Step 5: Set render callback */
 	if (noErr != (result = AudioUnitSetProperty(
 		cur_audio.outputAudioUnit,
 		kAudioUnitProperty_SetRenderCallback,
@@ -2608,23 +2631,39 @@ LOCALFUNC blnr MySound_Init(void)
 		&callback,
 		sizeof(callback))))
 	{
+		fprintf(stderr, "Warning: Audio initialization failed: "
+			"Could not set render callback (error: %d). "
+			"Audio will be disabled.\n", (int)result);
 #if dbglog_HAVE
 		dbglog_writeln("Failed to start CoreAudio: "
 			"AudioUnitSetProperty(kAudioUnitProperty_SetInputCallback)"
 			);
 #endif
-	} else
-
-	{
-		cur_audio.enabled = trueblnr;
-
-		MySound_Start();
-			/*
-				This should be taken care of by LeaveSpeedStopped,
-				but since takes a while to get going properly,
-				start early.
-			*/
+		goto label_cleanup;
 	}
+
+	/* Success: Enable audio */
+	cur_audio.enabled = trueblnr;
+
+	MySound_Start();
+		/*
+			This should be taken care of by LeaveSpeedStopped,
+			but since takes a while to get going properly,
+			start early.
+		*/
+
+	return trueblnr; /* keep going, even if no sound */
+
+label_cleanup:
+	/* Cleanup on failure */
+	if (cleanupNeeded) {
+		if (cur_audio.outputAudioUnit != NULL) {
+			AudioComponentInstanceDispose(cur_audio.outputAudioUnit);
+			cur_audio.outputAudioUnit = NULL;
+		}
+		cleanupNeeded = falseblnr;
+	}
+	cur_audio.enabled = falseblnr;
 
 	return trueblnr; /* keep going, even if no sound */
 }

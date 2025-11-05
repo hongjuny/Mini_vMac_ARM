@@ -2181,6 +2181,11 @@ typedef ui4r trSoundTemp;
 
 #define AudioStepVal 0x0040
 
+/* Audio initialization constants */
+#define kMacPlusClockRate 7833600UL  /* Mac Plus clock frequency in Hz */
+#define kSoundBufferSize 704         /* Sound buffer size in samples */
+#define kSoundRetryDelayNs 10000000L /* Delay between retries: 10ms in nanoseconds */
+
 #if 3 == kLn2SoundSampSz
 #define ConvertTempSoundSampleFromNative(v) ((v) << 8)
 #elif 4 == kLn2SoundSampSz
@@ -2424,7 +2429,7 @@ label_retry:
 #endif
 
 			rqt.tv_sec = 0;
-			rqt.tv_nsec = 10000000;
+			rqt.tv_nsec = kSoundRetryDelayNs;
 			(void) nanosleep(&rqt, &rmt);
 
 			goto label_retry;
@@ -2509,7 +2514,8 @@ LOCALPROC MySound_UnInit(void)
 	}
 }
 
-#define SOUND_SAMPLERATE 22255 /* = round(7833600 * 2 / 704) */
+/* Sound sample rate calculation: round(MacPlusClockRate * 2 / SoundBufferSize) */
+#define SOUND_SAMPLERATE (unsigned int)((kMacPlusClockRate * 2 + kSoundBufferSize / 2) / kSoundBufferSize)
 
 LOCALFUNC blnr MySound_Init(void)
 {

@@ -3571,9 +3571,11 @@ LOCALPROC MyDrawWithMetal(ui4r top, ui4r left, ui4r bottom, ui4r right)
 		scaleFactor = [window backingScaleFactor];
 	}
 	
+	/* Use actual drawable size for accurate viewport dimensions */
+	CGSize drawableSize = MyMetalLayer.drawableSize;
 	float viewportSize[2] = {
-		(float)(viewBounds.size.width * scaleFactor),
-		(float)(viewBounds.size.height * scaleFactor)
+		(float)drawableSize.width,
+		(float)drawableSize.height
 	};
 	float textureSize[2] = {
 		(float)vMacScreenWidth,
@@ -4077,7 +4079,8 @@ LOCALFUNC blnr CreateMainWindow(void)
 		/* OpenGL offsets removed - Metal doesn't need them */
 
 		style = NSTitledWindowMask
-			| NSMiniaturizableWindowMask | NSClosableWindowMask;
+			| NSMiniaturizableWindowMask | NSClosableWindowMask
+			| NSResizableWindowMask;
 
 		CurWinIndx = WinIndx;
 	}

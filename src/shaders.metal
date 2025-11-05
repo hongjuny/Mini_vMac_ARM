@@ -36,16 +36,20 @@ vertex VertexOut vertex_main(uint vertexID [[vertex_id]],
 	float viewportAspect = viewportSize.x / viewportSize.y;
 	float textureAspect = textureSize.x / textureSize.y;
 	
-	/* Scale positions to maintain aspect ratio */
+	/* Scale positions to maintain aspect ratio and center */
 	float2 scaledPos;
 	if (viewportAspect > textureAspect) {
 		/* Viewport is wider - letterbox (black bars on sides) */
 		float scale = textureAspect / viewportAspect;
-		scaledPos = float2(positions[vertexID].x * scale, positions[vertexID].y);
+		/* Center horizontally */
+		float offsetX = 0.0;  /* Already centered since we scale around origin */
+		scaledPos = float2(positions[vertexID].x * scale + offsetX, positions[vertexID].y);
 	} else {
 		/* Viewport is taller - pillarbox (black bars on top/bottom) */
 		float scale = viewportAspect / textureAspect;
-		scaledPos = float2(positions[vertexID].x, positions[vertexID].y * scale);
+		/* Center vertically */
+		float offsetY = 0.0;  /* Already centered since we scale around origin */
+		scaledPos = float2(positions[vertexID].x, positions[vertexID].y * scale + offsetY);
 	}
 	
 	/* Texture coordinates (0 to 1) */

@@ -4117,9 +4117,7 @@ LOCALPROC ZapMyWState(void)
 	MyCGcontext = nil;
 	MyPixels = NULL;
 #endif
-#if !USE_METAL
-	MyNSOpnGLCntxt = nil;
-#endif
+	/* OpenGL code removed - Metal only */
 }
 #endif
 

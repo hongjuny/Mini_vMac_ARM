@@ -37,6 +37,13 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <MetalKit/MetalKit.h>
 
+/* Uniform Type Identifiers for drag and drop */
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 110000
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#else
+#import <MobileCoreServices/MobileCoreServices.h>
+#endif
+
 /* --- adapting to API/ABI version differences --- */
 
 
@@ -3764,23 +3771,36 @@ typedef NSUInteger (*modifierFlagsProcPtr)
 			[sender draggingSourceOperationMask];
 	*/
 
-	if ([[pboard types] containsObject:NSFilenamesPboardType]) {
+	/* Try NSURLPboardType first (modern API) */
+	if ([[pboard types] containsObject: NSURLPboardType]) {
+		NSURL *fileURL = [NSURL URLFromPasteboard: pboard];
+		if (nil != fileURL) {
+			NSString* filePath = [fileURL path];
+			if (nil != filePath) {
+				Sony_ResolveInsert(filePath);
+				v = YES;
+			}
+		}
+	}
+	
+	/* Fallback to NSFilenamesPboardType (deprecated but still works) */
+	if (!v && [[pboard types] containsObject:NSFilenamesPboardType]) {
 		int i;
 		NSArray *file_names =
 			[pboard propertyListForType: NSFilenamesPboardType];
-		int n = [file_names count];
+		if (nil != file_names) {
+			int n = [file_names count];
 
-		for (i = 0; i < n; ++i) {
-			NSString *filePath = [file_names objectAtIndex:i];
-			Sony_ResolveInsert(filePath);
+			for (i = 0; i < n; ++i) {
+				NSString *filePath = [file_names objectAtIndex:i];
+				if (nil != filePath) {
+					Sony_ResolveInsert(filePath);
+					v = YES;
+				}
+			}
 		}
-		v = YES;
-	} else if ([[pboard types] containsObject: NSURLPboardType]) {
-		NSURL *fileURL = [NSURL URLFromPasteboard: pboard];
-		NSString* filePath = [fileURL path];
-		Sony_ResolveInsert(filePath);
-		v = YES;
 	}
+	
 
 	if (v && gTrueBackgroundFlag) {
 		{
@@ -4126,6 +4146,13 @@ LOCALFUNC blnr CreateMainWindow(void)
 	[MyWindow setAcceptsMouseMovedEvents: YES];
 	[MyWindow setViewsNeedDisplay: NO];
 
+#if EnableDragDrop
+	/* Register for drag and drop (disk images) - before setting content view */
+	[MyWindow registerForDraggedTypes:
+		[NSArray arrayWithObjects:
+			NSURLPboardType, NSFilenamesPboardType, nil]];
+#endif
+
 	MyWinDelegate = [[MyClassWindowDelegate alloc] init];
 	if (nil == MyWinDelegate) {
 #if dbglog_HAVE
@@ -4143,13 +4170,6 @@ LOCALFUNC blnr CreateMainWindow(void)
 		goto label_exit;
 	}
 	[MyWindow setContentView: MyNSview];
-
-#if EnableDragDrop
-	/* Register for drag and drop (disk images) */
-	[MyNSview registerForDraggedTypes:
-		[NSArray arrayWithObjects:
-			NSURLPboardType, NSFilenamesPboardType, nil]];
-#endif
 
 	[MyWindow makeKeyAndOrderFront: nil];
 
